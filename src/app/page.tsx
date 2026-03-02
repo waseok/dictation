@@ -176,7 +176,7 @@ export default function Home() {
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          Gemini 2.5 Flash OCR + GPT-4o 채점
+          Gemini 2.5 Flash OCR + 채점
         </p>
       </div>
     </main>

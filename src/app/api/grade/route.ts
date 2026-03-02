@@ -2,9 +2,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { splitOcrLines } from '@/lib/grading';
 import { GradeToken, GradeResult, QuestionResult, MultiGradeResult } from '@/types';
 
-// ─── Step 1: GPT-4o-mini로 CLOVA OCR 원문 정제 ───────────────────────────────
-// 그리드 방식 시험지에서 CLOVA는 글자 하나마다 공백을 넣고 줄바꿈을 임의로 삽입함.
-// 이 단계에서는 "형식만 정리"하고 절대 맞춤법·철자를 수정하지 않는다.
+const GEMINI_URL =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
+async function callGemini(prompt: string, apiKey: string): Promise<string> {
+  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 2000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+}
+
+// ─── Step 1 (폴백): CLOVA OCR 원문 정제 ──────────────────────────────────────
 async function normalizeOcrText(
   rawText: string,
   questionCount: number,
@@ -18,7 +42,6 @@ async function normalizeOcrText(
     '맞춤법·철자 오류가 있어도 그대로 유지해야 해.\n' +
     '예) "되요" → "되요" 유지 (❌ "돼요"로 수정 금지)\n' +
     '예) "도름이" → "도름이" 유지 (❌ "도움이"로 수정 금지)\n' +
-    '예) "맞추다" → "맞추다" 유지 (❌ "맞히다"로 수정 금지)\n' +
     '이 텍스트는 채점용이라 학생 실수를 그대로 보존해야 해.\n\n' +
     '━━━ 처리 방법 ━━━\n' +
     `- 총 ${questionCount}문항\n` +
@@ -30,40 +53,19 @@ async function normalizeOcrText(
     'JSON만 출력 (설명 없음):\n' +
     '{"1":"복원된 답","2":"복원된 답",...}';
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 600,
-      temperature: 0, // 창의적 수정 방지
-      response_format: { type: 'json_object' },
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`normalize API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  const content: string = data.choices?.[0]?.message?.content ?? '{}';
+  const content = await callGemini(prompt, apiKey);
   console.log('[normalize] result:', content);
   return JSON.parse(content) as Record<string, string>;
 }
 
-// ─── Step 2: GPT-4o로 정답 vs 학생 답 채점 ──────────────────────────────────
+// ─── Step 2: Gemini 2.5 Flash로 채점 ─────────────────────────────────────────
 interface GradeQuestion {
   correct: string;
   student: string;
   originalIndex: number;
 }
 
-async function gradeWithGpt(
+async function gradeWithGemini(
   questions: GradeQuestion[],
   apiKey: string,
 ): Promise<{ tokens: { correct: string; student: string; status: string }[] }[]> {
@@ -88,27 +90,8 @@ async function gradeWithGpt(
     '출력:\n' +
     '{"results":[{"tokens":[{"correct":"어절","student":"학생어절","status":"correct|spelling-error|spacing-error|missing"}]}]}';
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`grade API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  const content: string = data.choices?.[0]?.message?.content ?? '{}';
+  const content = await callGemini(prompt, apiKey);
+  console.log('[grade] result:', content);
   const parsed = JSON.parse(content) as {
     results?: { tokens: { correct: string; student: string; status: string }[] }[];
   };
@@ -117,15 +100,15 @@ async function gradeWithGpt(
 
 // ─── Main handler ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ error: 'OPENAI_API_KEY가 없습니다.' }, { status: 500 });
+    return NextResponse.json({ error: 'GEMINI_API_KEY가 없습니다.' }, { status: 500 });
   }
 
   const body = await req.json() as {
     answers: string[];
     ocrText: string;
-    lines?: Record<string, string>; // GPT-4o Vision OCR 결과 (있으면 normalize 생략)
+    lines?: Record<string, string>; // Gemini Vision OCR 결과 (있으면 normalize 생략)
   };
   const { answers, ocrText, lines: visionLines } = body;
 
@@ -138,15 +121,13 @@ export async function POST(req: NextRequest) {
     .filter((q) => q.correct.length > 0);
 
   // Step 1: 학생 답 확정
-  // GPT-4o Vision이 이미 문항별로 인식했으면 그대로 사용, 없으면 GPT-4o-mini로 정제
+  // Gemini Vision이 이미 문항별로 인식했으면 그대로 사용, 없으면 Gemini로 정제
   let studentAnswerMap: Record<string, string> = {};
   let normalizeError: string | null = null;
 
   if (visionLines && Object.keys(visionLines).length > 0) {
-    // Vision OCR 경로: 이미 구조화된 결과 직접 사용
     studentAnswerMap = visionLines;
   } else {
-    // 폴백: GPT-4o-mini로 CLOVA 원문 정제
     try {
       studentAnswerMap = await normalizeOcrText(ocrText, activeAnswers.length, apiKey);
     } catch (err) {
@@ -165,10 +146,10 @@ export async function POST(req: NextRequest) {
     originalIndex: q.originalIndex,
   }));
 
-  // Step 2: GPT-4o로 채점
+  // Step 2: Gemini 2.5 Flash로 채점
   let rawResults: { tokens: { correct: string; student: string; status: string }[] }[] = [];
   try {
-    rawResults = await gradeWithGpt(questions, apiKey);
+    rawResults = await gradeWithGemini(questions, apiKey);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `채점 실패: ${message}` }, { status: 502 });
