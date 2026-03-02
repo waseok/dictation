@@ -4,17 +4,27 @@ import { useState } from 'react';
 import AnswerInput from '@/components/AnswerInput';
 import ImageCapture from '@/components/ImageCapture';
 import GradingResult from '@/components/GradingResult';
-import { grade } from '@/lib/grading';
-import { GradeResult } from '@/types';
+import { gradeMultiple } from '@/lib/grading';
+import { MultiGradeResult } from '@/types';
 
 type Step = 'input' | 'capture' | 'result';
 
+const QUESTION_COUNT = 10;
+
 export default function Home() {
   const [step, setStep] = useState<Step>('input');
-  const [correctAnswer, setCorrectAnswer] = useState('');
-  const [gradeResult, setGradeResult] = useState<GradeResult | null>(null);
+  const [answers, setAnswers] = useState<string[]>(Array(QUESTION_COUNT).fill(''));
+  const [gradeResult, setGradeResult] = useState<MultiGradeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function handleAnswerChange(index: number, value: string) {
+    setAnswers((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  }
 
   async function handleGrade(file: File) {
     setLoading(true);
@@ -34,7 +44,7 @@ export default function Home() {
       }
 
       const ocrText: string = json.text ?? '';
-      const result = grade(correctAnswer, ocrText);
+      const result = gradeMultiple(answers, ocrText);
       setGradeResult(result);
       setStep('result');
     } catch {
@@ -48,6 +58,7 @@ export default function Home() {
     setStep('input');
     setGradeResult(null);
     setError(null);
+    setAnswers(Array(QUESTION_COUNT).fill(''));
   }
 
   const stepLabels = ['정답 입력', '사진 촬영', '채점 결과'];
@@ -88,8 +99,8 @@ export default function Home() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
           {step === 'input' && (
             <AnswerInput
-              value={correctAnswer}
-              onChange={setCorrectAnswer}
+              answers={answers}
+              onChange={handleAnswerChange}
               onNext={() => setStep('capture')}
             />
           )}

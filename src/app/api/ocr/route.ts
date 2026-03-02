@@ -70,8 +70,12 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    console.error('CLOVA OCR fetch error:', err);
-    return NextResponse.json({ error: 'OCR 서버에 연결할 수 없습니다.' }, { status: 502 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('CLOVA OCR fetch error:', message);
+    return NextResponse.json(
+      { error: `OCR 서버에 연결할 수 없습니다. (${message}) — Vercel 환경변수(CLOVA_OCR_INVOKE_URL, CLOVA_OCR_SECRET)가 설정되어 있는지 확인해주세요.` },
+      { status: 502 }
+    );
   }
 
   if (!clovaRes.ok) {

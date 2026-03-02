@@ -1,4 +1,4 @@
-import { GradeResult, GradeToken, TokenStatus } from '@/types';
+import { GradeResult, GradeToken, TokenStatus, MultiGradeResult, QuestionResult } from '@/types';
 
 function tokenize(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -167,4 +167,37 @@ export function grade(correctText: string, studentText: string): GradeResult {
     tokens,
     ocrText: studentText,
   };
+}
+
+// Remove leading question numbers like "1.", "1)", "①", "②", etc.
+function cleanAnswerLine(line: string): string {
+  return line.replace(/^\s*(\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '').trim();
+}
+
+// Split OCR text into per-question lines
+export function splitOcrLines(text: string): string[] {
+  return text.split('\n').map(cleanAnswerLine);
+}
+
+// Grade multiple questions from a single OCR text
+export function gradeMultiple(correctAnswers: string[], ocrText: string): MultiGradeResult {
+  const ocrLines = splitOcrLines(ocrText);
+  const activeAnswers = correctAnswers.map((a, i) => ({ answer: a, originalIndex: i }))
+    .filter(({ answer }) => answer.trim().length > 0);
+
+  const questions: QuestionResult[] = activeAnswers.map(({ answer, originalIndex }, i) => {
+    const studentLine = ocrLines[i] ?? '';
+    return {
+      questionNumber: originalIndex + 1,
+      correctAnswer: answer,
+      result: grade(answer, studentLine),
+    };
+  });
+
+  const totalScore =
+    questions.length > 0
+      ? Math.round(questions.reduce((sum, q) => sum + q.result.score, 0) / questions.length)
+      : 0;
+
+  return { questions, totalScore };
 }

@@ -1,11 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { GradeResult } from '@/types';
+import { MultiGradeResult, QuestionResult } from '@/types';
 import DiffView from './DiffView';
 
 interface GradingResultProps {
-  result: GradeResult;
+  result: MultiGradeResult;
   onReset: () => void;
 }
 
@@ -20,10 +20,68 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
+function QuestionRow({ q }: { q: QuestionResult }) {
+  const [open, setOpen] = useState(false);
+  const { result } = q;
+  const scoreColor =
+    result.score === 100
+      ? 'text-green-600'
+      : result.score >= 60
+      ? 'text-yellow-600'
+      : 'text-red-600';
+
+  const hasError = result.spellingErrorCount > 0 || result.spacingErrorCount > 0 || result.missingCount > 0;
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+      >
+        <span className="text-sm font-bold text-gray-500 w-6 shrink-0">{q.questionNumber}.</span>
+        <span className="flex-1 text-sm text-gray-700 truncate">{q.correctAnswer}</span>
+        <span className={`text-sm font-bold tabular-nums shrink-0 ${scoreColor}`}>
+          {result.score}점
+        </span>
+        {hasError && (
+          <span className="text-xs text-gray-400 shrink-0">
+            {result.spellingErrorCount > 0 && `맞춤법 ${result.spellingErrorCount} `}
+            {result.spacingErrorCount > 0 && `띄어쓰기 ${result.spacingErrorCount} `}
+            {result.missingCount > 0 && `누락 ${result.missingCount}`}
+          </span>
+        )}
+        <span className="text-gray-400 text-xs shrink-0">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 py-3 bg-white flex flex-col gap-3">
+          <DiffView tokens={result.tokens} />
+          {result.ocrText && (
+            <p className="text-xs text-gray-400">
+              OCR: <span className="font-mono">{result.ocrText}</span>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GradingResult({ result, onReset }: GradingResultProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
-  const [showOcr, setShowOcr] = useState(false);
+
+  const totalCorrect = result.questions.reduce((s, q) => s + q.result.correctCount, 0);
+  const totalWords = result.questions.reduce((s, q) => s + q.result.totalCount, 0);
+  const totalSpelling = result.questions.reduce((s, q) => s + q.result.spellingErrorCount, 0);
+  const totalSpacing = result.questions.reduce((s, q) => s + q.result.spacingErrorCount, 0);
+  const totalMissing = result.questions.reduce((s, q) => s + q.result.missingCount, 0);
+
+  const today = new Date().toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 
   async function handleDownload() {
     if (!cardRef.current) return;
@@ -58,15 +116,9 @@ export default function GradingResult({ result, onReset }: GradingResultProps) {
     }
   }
 
-  const today = new Date().toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
   return (
     <div className="flex flex-col gap-4">
-      {/* Downloadable card */}
+      {/* Downloadable summary card */}
       <div
         ref={cardRef}
         className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-4 shadow-sm"
@@ -76,62 +128,38 @@ export default function GradingResult({ result, onReset }: GradingResultProps) {
           <span className="text-xs text-gray-400">{today}</span>
         </div>
 
-        {/* Score */}
+        {/* Overall score */}
         <div className="flex items-center justify-center py-2">
-          <ScoreRing score={result.score} />
+          <ScoreRing score={result.totalScore} />
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-2 text-center">
-          <StatBox label="정답" value={result.correctCount} color="green" />
-          <StatBox label="맞춤법" value={result.spellingErrorCount} color="red" />
-          <StatBox label="띄어쓰기" value={result.spacingErrorCount} color="yellow" />
-          <StatBox label="누락" value={result.missingCount} color="gray" />
+          <StatBox label="정답" value={totalCorrect} color="green" />
+          <StatBox label="맞춤법" value={totalSpelling} color="red" />
+          <StatBox label="띄어쓰기" value={totalSpacing} color="yellow" />
+          <StatBox label="누락" value={totalMissing} color="gray" />
         </div>
 
-        {/* Word diff */}
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            단어별 채점
-          </p>
-          <DiffView tokens={result.tokens} />
-        </div>
-
-        {/* Legend */}
-        <div className="flex flex-wrap gap-3 text-xs text-gray-500">
-          <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-green-400 mr-1" />
-            정답
-          </span>
-          <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-red-400 mr-1" />
-            맞춤법 오류
-          </span>
-          <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-yellow-400 mr-1" />
-            띄어쓰기 오류
-          </span>
-          <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-gray-300 mr-1" />
-            누락
-          </span>
-        </div>
+        <p className="text-xs text-gray-400 text-center">
+          {result.questions.length}문제 · 총 {totalWords}단어
+        </p>
       </div>
 
-      {/* OCR raw text (collapsible, outside the card) */}
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
-        <button
-          onClick={() => setShowOcr((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 text-sm font-medium text-gray-600 hover:bg-gray-100"
-        >
-          <span>OCR 인식 원문</span>
-          <span>{showOcr ? '▲' : '▼'}</span>
-        </button>
-        {showOcr && (
-          <div className="px-4 py-3 text-sm text-gray-700 whitespace-pre-wrap bg-white">
-            {result.ocrText || '(인식된 텍스트 없음)'}
-          </div>
-        )}
+      {/* Per-question breakdown */}
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">문제별 결과</p>
+        {result.questions.map((q) => (
+          <QuestionRow key={q.questionNumber} q={q} />
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 text-xs text-gray-500 px-1">
+        <span><span className="inline-block w-2 h-2 rounded-sm bg-green-400 mr-1" />정답</span>
+        <span><span className="inline-block w-2 h-2 rounded-sm bg-red-400 mr-1" />맞춤법 오류</span>
+        <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-400 mr-1" />띄어쓰기 오류</span>
+        <span><span className="inline-block w-2 h-2 rounded-sm bg-gray-300 mr-1" />누락</span>
       </div>
 
       {/* Actions */}

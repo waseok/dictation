@@ -16,3 +16,14 @@ export interface GradeResult {
   tokens: GradeToken[];
   ocrText: string;
 }
+
+export interface QuestionResult {
+  questionNumber: number;
+  correctAnswer: string;
+  result: GradeResult;
+}
+
+export interface MultiGradeResult {
+  questions: QuestionResult[];
+  totalScore: number;
+}
