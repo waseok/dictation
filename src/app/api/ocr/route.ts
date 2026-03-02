@@ -17,8 +17,8 @@ interface ClovaResponse {
 }
 
 export async function POST(req: NextRequest) {
-  const invokeUrl = process.env.CLOVA_OCR_INVOKE_URL;
-  const secret = process.env.CLOVA_OCR_SECRET;
+  const invokeUrl = process.env.CLOVA_OCR_INVOKE_URL?.trim();
+  const secret = process.env.CLOVA_OCR_SECRET?.trim();
 
   if (!invokeUrl || !secret) {
     return NextResponse.json(
@@ -81,10 +81,21 @@ export async function POST(req: NextRequest) {
   if (!clovaRes.ok) {
     const errText = await clovaRes.text();
     console.error('CLOVA OCR error response:', errText);
-    return NextResponse.json(
-      { error: `OCR API 오류 (${clovaRes.status}): ${errText}` },
-      { status: clovaRes.status }
-    );
+
+    let userMessage = `OCR API 오류 (${clovaRes.status})`;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.code === '0002' || errJson.message?.toLowerCase().includes('secret')) {
+        userMessage =
+          'OCR 인증에 실패했습니다. CLOVA_OCR_SECRET 환경변수가 올바른지 확인해주세요.';
+      } else if (errJson.message) {
+        userMessage = `OCR API 오류: ${errJson.message}`;
+      }
+    } catch {
+      // errText가 JSON이 아닌 경우 기본 메시지 사용
+    }
+
+    return NextResponse.json({ error: userMessage }, { status: clovaRes.status });
   }
 
   const data: ClovaResponse = await clovaRes.json();
