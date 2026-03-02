@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f9fafb;
+  --background: #fffbeb;
   --foreground: #111827;
 }
 
@@ -15,4 +15,20 @@
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/* 노트 줄 배경 – 받아쓰기 공책 느낌 */
+.notebook-lines {
+  background-color: #ffffff;
+  background-image:
+    /* 빨간 왼쪽 여백선 */
+    linear-gradient(to right, transparent 32px, #fca5a5 32px, #fca5a5 33px, transparent 33px),
+    /* 파란 가로 줄 */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 39px,
+      #bfdbfe 39px,
+      #bfdbfe 40px
+    );
 }

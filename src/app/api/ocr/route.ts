@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'OpenAI API 키가 없습니다. .env.local에 OPENAI_API_KEY를 설정해주세요.' },
+      { error: 'Gemini API 키가 없습니다. .env.local에 GEMINI_API_KEY를 설정해주세요.' },
       { status: 500 }
     );
   }
@@ -37,53 +37,47 @@ export async function POST(req: NextRequest) {
     '문항 번호가 보이지 않으면 줄 순서대로 번호를 붙이세요. ' +
     '답이 없는 문항은 해당 번호만 쓰고 답 칸을 비워두세요.';
 
-  let gptRes: Response;
+  const model = 'gemini-3-flash-preview';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  let geminiRes: Response;
   try {
-    gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    geminiRes = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
+        contents: [
           {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: { url: `data:${mimeType};base64,${base64}` },
-              },
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: mimeType, data: base64 } },
             ],
           },
         ],
-        max_tokens: 1000,
       }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `OpenAI 서버에 연결할 수 없습니다. (${message})` },
+      { error: `Gemini 서버에 연결할 수 없습니다. (${message})` },
       { status: 502 }
     );
   }
 
-  if (!gptRes.ok) {
-    const errText = await gptRes.text();
-    console.error('OpenAI API error:', errText);
+  if (!geminiRes.ok) {
+    const errText = await geminiRes.text();
+    console.error('Gemini API error:', errText);
     return NextResponse.json(
-      { error: `OpenAI API 오류 (${gptRes.status}): ${errText}` },
-      { status: gptRes.status }
+      { error: `Gemini API 오류 (${geminiRes.status}): ${errText}` },
+      { status: geminiRes.status }
     );
   }
 
-  const data = await gptRes.json();
-  const text: string = data.choices?.[0]?.message?.content?.trim() ?? '';
+  const data = await geminiRes.json();
+  const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
 
   if (!text) {
-    return NextResponse.json({ error: 'GPT가 텍스트를 인식하지 못했습니다.' }, { status: 422 });
+    return NextResponse.json({ error: 'Gemini가 텍스트를 인식하지 못했습니다.' }, { status: 422 });
   }
 
   return NextResponse.json({ text });

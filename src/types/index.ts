@@ -1,5 +1,7 @@
 export type TokenStatus = 'correct' | 'spelling-error' | 'spacing-error' | 'missing';
 
+export type LoadingPhase = 'idle' | 'ocr' | 'grading';
+
 export interface GradeToken {
   correct: string;
   student: string;
