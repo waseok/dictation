@@ -3,7 +3,7 @@ import { splitOcrLines } from '@/lib/grading';
 import { GradeToken, GradeResult, QuestionResult, MultiGradeResult } from '@/types';
 
 const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
 async function callGemini(prompt: string, apiKey: string, maxOutputTokens = 4096): Promise<string> {
   const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
