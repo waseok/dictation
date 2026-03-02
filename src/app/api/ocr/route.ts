@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
+
+interface ClovaField {
+  inferText: string;
+  lineBreak: boolean;
+}
+
+interface ClovaImage {
+  inferResult: string;
+  message: string;
+  fields: ClovaField[];
+}
+
+interface ClovaResponse {
+  images: ClovaImage[];
+}
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const invokeUrl = process.env.CLOVA_OCR_INVOKE_URL;
+  const secret = process.env.CLOVA_OCR_SECRET;
+
+  if (!invokeUrl || !secret) {
     return NextResponse.json(
-      { error: 'OpenAI API 키가 없습니다. .env.local에 OPENAI_API_KEY를 설정해주세요.' },
+      { error: 'OCR API 설정이 없습니다. .env.local에 CLOVA_OCR_INVOKE_URL과 CLOVA_OCR_SECRET을 설정해주세요.' },
       { status: 500 }
     );
   }
@@ -23,68 +41,59 @@ export async function POST(req: NextRequest) {
 
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString('base64');
-  const mimeType = file.type || 'image/jpeg';
 
-  const prompt =
-    '이 이미지는 초등학생이 쓴 받아쓰기 답안지입니다. ' +
-    '각 문항 번호와 학생이 쓴 답을 정확히 읽어서 아래 형식으로만 출력하세요. ' +
-    '절대 내용을 수정하거나 맞춤법을 고치지 마세요. 학생이 쓴 그대로 출력하세요.\n\n' +
-    '출력 형식:\n' +
-    '1. [1번 답]\n' +
-    '2. [2번 답]\n' +
-    '3. [3번 답]\n' +
-    '...\n\n' +
-    '문항 번호가 보이지 않으면 줄 순서대로 번호를 붙이세요. ' +
-    '답이 없는 문항은 해당 번호만 쓰고 답 칸을 비워두세요.';
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
+  const format = ext === 'jpg' ? 'jpeg' : ext;
 
-  let gptRes: Response;
+  const body = {
+    version: 'V2',
+    requestId: randomUUID(),
+    timestamp: 0,
+    lang: 'ko',
+    images: [{ format, name: file.name, data: base64 }],
+  };
+
+  let clovaRes: Response;
   try {
-    gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    clovaRes = await fetch(invokeUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'X-OCR-SECRET': secret,
       },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: { url: `data:${mimeType};base64,${base64}` },
-              },
-            ],
-          },
-        ],
-        max_tokens: 1000,
-      }),
+      body: JSON.stringify(body),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `OpenAI 서버에 연결할 수 없습니다. (${message})` },
+      { error: `OCR 서버에 연결할 수 없습니다. (${message})` },
       { status: 502 }
     );
   }
 
-  if (!gptRes.ok) {
-    const errText = await gptRes.text();
-    console.error('OpenAI API error:', errText);
+  if (!clovaRes.ok) {
+    const errText = await clovaRes.text();
+    console.error('CLOVA OCR error:', errText);
     return NextResponse.json(
-      { error: `OpenAI API 오류 (${gptRes.status}): ${errText}` },
-      { status: gptRes.status }
+      { error: `OCR API 오류 (${clovaRes.status}): ${errText}` },
+      { status: clovaRes.status }
     );
   }
 
-  const data = await gptRes.json();
-  const text: string = data.choices?.[0]?.message?.content?.trim() ?? '';
+  const data: ClovaResponse = await clovaRes.json();
+  const image = data.images?.[0];
 
-  if (!text) {
-    return NextResponse.json({ error: 'GPT가 텍스트를 인식하지 못했습니다.' }, { status: 422 });
+  if (!image || image.inferResult !== 'SUCCESS') {
+    return NextResponse.json(
+      { error: `OCR 인식 실패: ${image?.message ?? '알 수 없는 오류'}` },
+      { status: 422 }
+    );
   }
+
+  const text = (image.fields ?? [])
+    .map((field) => field.inferText + (field.lineBreak ? '\n' : ' '))
+    .join('')
+    .trim();
 
   return NextResponse.json({ text });
 }

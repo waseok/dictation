@@ -4,7 +4,7 @@ import { useState } from 'react';
 import AnswerInput from '@/components/AnswerInput';
 import ImageCapture from '@/components/ImageCapture';
 import GradingResult from '@/components/GradingResult';
-import { gradeMultiple } from '@/lib/grading';
+import { splitOcrLines } from '@/lib/grading';
 import { GradingOptions, MultiGradeResult } from '@/types';
 
 type Step = 'input' | 'capture' | 'result';
@@ -23,6 +23,7 @@ export default function Home() {
   const [gradeResult, setGradeResult] = useState<MultiGradeResult | null>(null);
   const [ocrText, setOcrText] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState<'ocr' | 'grade' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function handleAnswerChange(index: number, value: string) {
@@ -38,27 +39,52 @@ export default function Home() {
     setError(null);
 
     try {
+      // Step 1: CLOVA OCR - 손글씨 인식
+      setLoadingStep('ocr');
       const formData = new FormData();
       formData.append('image', file);
 
-      const res = await fetch('/api/ocr', { method: 'POST', body: formData });
-      const json = await res.json();
+      const ocrRes = await fetch('/api/ocr', { method: 'POST', body: formData });
+      const ocrJson = await ocrRes.json();
 
-      if (!res.ok) {
-        setError(json.error ?? 'OCR 처리 중 오류가 발생했습니다.');
-        setLoading(false);
+      if (!ocrRes.ok) {
+        setError(ocrJson.error ?? 'OCR 처리 중 오류가 발생했습니다.');
         return;
       }
 
-      const rawOcrText: string = json.text ?? '';
+      const rawOcrText: string = ocrJson.text ?? '';
       setOcrText(rawOcrText);
-      const result = gradeMultiple(answers, rawOcrText, options);
-      setGradeResult(result);
+
+      // Step 2: GPT 채점 - 정답과 비교
+      setLoadingStep('grade');
+      const ocrLines = splitOcrLines(rawOcrText);
+      const activeQuestions = answers
+        .map((correct, i) => ({
+          correct: correct.trim(),
+          student: ocrLines[i] ?? '',
+          originalIndex: i,
+        }))
+        .filter((q) => q.correct.length > 0);
+
+      const gradeRes = await fetch('/api/grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions: activeQuestions, ocrText: rawOcrText }),
+      });
+      const gradeJson = await gradeRes.json();
+
+      if (!gradeRes.ok) {
+        setError(gradeJson.error ?? '채점 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setGradeResult(gradeJson as MultiGradeResult);
       setStep('result');
     } catch {
       setError('네트워크 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(false);
+      setLoadingStep(null);
     }
   }
 
@@ -76,6 +102,9 @@ export default function Home() {
 
   const stepLabels = ['정답 입력', '사진 촬영', '채점 결과'];
   const stepIndex = step === 'input' ? 0 : step === 'capture' ? 1 : 2;
+
+  const loadingMessage =
+    loadingStep === 'ocr' ? '손글씨 인식 중...' : loadingStep === 'grade' ? 'AI 채점 중...' : '';
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center py-6 px-4">
@@ -127,6 +156,12 @@ export default function Home() {
                   {error}
                 </div>
               )}
+              {loading && loadingMessage && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700 flex items-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  {loadingMessage}
+                </div>
+              )}
               <ImageCapture
                 onGrade={handleGrade}
                 onBack={() => { setError(null); setStep('input'); }}
@@ -146,7 +181,7 @@ export default function Home() {
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          Powered by GPT-4o Vision
+          CLOVA OCR + GPT-4o 채점
         </p>
       </div>
     </main>
