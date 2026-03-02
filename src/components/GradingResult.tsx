@@ -10,13 +10,17 @@ interface GradingResultProps {
   onNewStudent: () => void;
 }
 
-function ScoreRing({ score }: { score: number }) {
+function ScoreFraction({ correct, total }: { correct: number; total: number }) {
+  const ratio = total > 0 ? correct / total : 0;
   const color =
-    score >= 80 ? 'text-green-500' : score >= 50 ? 'text-yellow-500' : 'text-red-500';
+    ratio >= 0.8 ? 'text-green-600' : ratio >= 0.5 ? 'text-yellow-500' : 'text-red-500';
   return (
-    <div className={`text-6xl font-black ${color} tabular-nums`}>
-      {score}
-      <span className="text-3xl font-bold">점</span>
+    <div className="flex flex-col items-center py-2">
+      <div className={`tabular-nums font-black leading-none ${color}`}>
+        <span className="text-6xl">{correct}</span>
+        <span className="text-3xl text-gray-400 font-bold"> / {total}</span>
+      </div>
+      <div className="text-sm text-gray-500 mt-2 font-medium">문제 정답</div>
     </div>
   );
 }
@@ -24,14 +28,18 @@ function ScoreRing({ score }: { score: number }) {
 function QuestionRow({ q }: { q: QuestionResult }) {
   const [open, setOpen] = useState(false);
   const { result } = q;
-  const scoreColor =
-    result.score === 100
-      ? 'text-green-600'
-      : result.score >= 60
-      ? 'text-yellow-600'
-      : 'text-red-600';
 
-  const hasError = result.spellingErrorCount > 0 || result.spacingErrorCount > 0 || result.missingCount > 0;
+  const isCorrect = result.score === 100;
+  const isPartial = result.score > 0 && result.score < 100;
+  const icon = isCorrect ? '✓' : isPartial ? '△' : '✗';
+  const iconColor = isCorrect
+    ? 'text-green-600 bg-green-50 border-green-200'
+    : isPartial
+    ? 'text-yellow-600 bg-yellow-50 border-yellow-200'
+    : 'text-red-600 bg-red-50 border-red-200';
+
+  const hasError =
+    result.spellingErrorCount > 0 || result.spacingErrorCount > 0 || result.missingCount > 0;
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -39,11 +47,8 @@ function QuestionRow({ q }: { q: QuestionResult }) {
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
       >
-        <span className="text-sm font-bold text-gray-500 w-6 shrink-0">{q.questionNumber}.</span>
+        <span className="text-sm font-bold text-gray-400 w-5 shrink-0">{q.questionNumber}.</span>
         <span className="flex-1 text-sm text-gray-700 truncate">{q.correctAnswer}</span>
-        <span className={`text-sm font-bold tabular-nums shrink-0 ${scoreColor}`}>
-          {result.score}점
-        </span>
         {hasError && (
           <span className="text-xs text-gray-400 shrink-0">
             {result.spellingErrorCount > 0 && `맞춤법 ${result.spellingErrorCount} `}
@@ -51,6 +56,11 @@ function QuestionRow({ q }: { q: QuestionResult }) {
             {result.missingCount > 0 && `누락 ${result.missingCount}`}
           </span>
         )}
+        <span
+          className={`w-7 h-7 rounded-full border flex items-center justify-center text-sm font-bold shrink-0 ${iconColor}`}
+        >
+          {icon}
+        </span>
         <span className="text-gray-400 text-xs shrink-0">{open ? '▲' : '▼'}</span>
       </button>
 
@@ -71,8 +81,10 @@ function QuestionRow({ q }: { q: QuestionResult }) {
 export default function GradingResult({ result, onReset, onNewStudent }: GradingResultProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const totalCorrect = result.questions.reduce((s, q) => s + q.result.correctCount, 0);
+  const correctCount = result.questions.filter((q) => q.result.score === 100).length;
+  const totalCount = result.questions.length;
   const totalWords = result.questions.reduce((s, q) => s + q.result.totalCount, 0);
   const totalSpelling = result.questions.reduce((s, q) => s + q.result.spellingErrorCount, 0);
   const totalSpacing = result.questions.reduce((s, q) => s + q.result.spacingErrorCount, 0);
@@ -87,12 +99,14 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
   async function handleDownload() {
     if (!cardRef.current) return;
     setDownloading(true);
+    setDownloadError(null);
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(cardRef.current, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
+        logging: false,
       });
       const dataUrl = canvas.toDataURL('image/png');
 
@@ -109,9 +123,12 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
       const a = document.createElement('a');
       a.href = dataUrl;
       a.download = '채점결과.png';
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
     } catch (err) {
       console.error('Download failed:', err);
+      setDownloadError('저장에 실패했습니다. 브라우저의 스크린샷 기능을 사용해주세요.');
     } finally {
       setDownloading(false);
     }
@@ -125,25 +142,25 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-4 shadow-sm"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-800">채점 결과</h2>
+          <h2 className="text-lg font-bold text-gray-800">✏️ 채점 결과</h2>
           <span className="text-xs text-gray-400">{today}</span>
         </div>
 
-        {/* Overall score */}
-        <div className="flex items-center justify-center py-2">
-          <ScoreRing score={result.totalScore} />
+        {/* Overall score as fraction */}
+        <div className="flex items-center justify-center">
+          <ScoreFraction correct={correctCount} total={totalCount} />
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-2 text-center">
-          <StatBox label="정답" value={totalCorrect} color="green" />
+          <StatBox label="정답" value={totalCount - totalSpelling - totalSpacing - totalMissing > 0 ? result.questions.reduce((s, q) => s + q.result.correctCount, 0) : 0} color="green" />
           <StatBox label="맞춤법" value={totalSpelling} color="red" />
           <StatBox label="띄어쓰기" value={totalSpacing} color="yellow" />
           <StatBox label="누락" value={totalMissing} color="gray" />
         </div>
 
         <p className="text-xs text-gray-400 text-center">
-          {result.questions.length}문제 · 총 {totalWords}단어
+          {totalCount}문제 · 총 {totalWords}단어
         </p>
       </div>
 
@@ -163,6 +180,13 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         <span><span className="inline-block w-2 h-2 rounded-sm bg-gray-300 mr-1" />누락</span>
       </div>
 
+      {/* Download error */}
+      {downloadError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          {downloadError}
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex gap-2">
         <button
@@ -175,7 +199,7 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         <button
           onClick={onNewStudent}
           className="flex-1 py-3 rounded-xl font-semibold text-white
-                     bg-blue-500 hover:bg-blue-600 active:bg-blue-700 transition-colors"
+                     bg-blue-700 hover:bg-blue-800 active:bg-blue-900 transition-colors"
         >
           다음 학생 →
         </button>
@@ -183,7 +207,7 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
           onClick={handleDownload}
           disabled={downloading}
           className="flex-[2] py-3 rounded-xl font-semibold text-white
-                     bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700
+                     bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800
                      disabled:opacity-60 disabled:cursor-not-allowed
                      transition-colors flex items-center justify-center gap-2"
         >
