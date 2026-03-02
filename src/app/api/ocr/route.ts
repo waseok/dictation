@@ -87,7 +87,13 @@ export async function POST(req: NextRequest) {
   }
 
   const data = await geminiRes.json();
-  const content: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  // thinking 모델은 parts[0]이 사고 과정(thought:true), parts[1]이 실제 응답
+  const parts: { text?: string; thought?: boolean }[] =
+    data.candidates?.[0]?.content?.parts ?? [];
+  const responsePart = parts.find((p) => !p.thought && p.text != null) ?? parts[0] ?? {};
+  const rawContent: string = responsePart.text ?? '{}';
+  // 마크다운 코드블록 감싸진 경우 제거
+  const content = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   console.log('[ocr] gemini result:', content);
 
   let lines: Record<string, string>;
