@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     '문항 번호가 보이지 않으면 줄 순서대로 번호를 붙이세요. ' +
     '답이 없는 문항은 해당 번호만 쓰고 답 칸을 비워두세요.';
 
-  const model = 'gemini-3.0-flash-preview';
+  const model = 'gemini-3-flash-preview';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   let geminiRes: Response;
