@@ -159,9 +159,50 @@ function cleanAnswerLine(line: string): string {
   return line.replace(/^\s*(\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '').trim();
 }
 
+const CIRCLE_NUMS = '①②③④⑤⑥⑦⑧⑨⑩';
+const QUESTION_START_RE = /^(\d+)[.)]\s*(.*)/;
+const CIRCLE_START_RE = new RegExp(`^([${CIRCLE_NUMS}])\\s*(.*)`);
+
+// Parse OCR text into per-question lines using question numbers as anchors.
+// Lines that don't start with a question number are treated as continuations
+// of the previous question, which fixes the "one answer split into two OCR lines"
+// alignment bug. Falls back to simple line-split if no question numbers are found.
 export function splitOcrLines(text: string, skipFirstLine = false): string[] {
-  const lines = text.split('\n').map(cleanAnswerLine);
-  return skipFirstLine ? lines.slice(1) : lines;
+  const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+
+  const questionMap = new Map<number, string>();
+  let lastQuestionNum: number | null = null;
+
+  for (const line of rawLines) {
+    const numMatch = line.match(QUESTION_START_RE);
+    const circleMatch = line.match(CIRCLE_START_RE);
+
+    if (numMatch) {
+      const questionNum = parseInt(numMatch[1], 10);
+      const content = numMatch[2].trim();
+      questionMap.set(questionNum, content);
+      lastQuestionNum = questionNum;
+    } else if (circleMatch) {
+      const questionNum = CIRCLE_NUMS.indexOf(circleMatch[1]) + 1;
+      const content = circleMatch[2].trim();
+      questionMap.set(questionNum, content);
+      lastQuestionNum = questionNum;
+    } else if (lastQuestionNum !== null) {
+      // Continuation line: merge into the current question
+      const existing = questionMap.get(lastQuestionNum) ?? '';
+      questionMap.set(lastQuestionNum, existing ? `${existing} ${line}` : line);
+    }
+    // Lines before any question number (e.g. name/title headers) are ignored
+  }
+
+  // Fallback: no question numbers detected → use simple line-based split
+  if (questionMap.size === 0) {
+    const lines = rawLines.map(cleanAnswerLine);
+    return skipFirstLine ? lines.slice(1) : lines;
+  }
+
+  const maxQ = Math.max(...questionMap.keys());
+  return Array.from({ length: maxQ }, (_, i) => questionMap.get(i + 1) ?? '');
 }
 
 export function gradeMultiple(
