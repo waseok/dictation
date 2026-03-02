@@ -4,7 +4,6 @@ import { useState } from 'react';
 import AnswerInput from '@/components/AnswerInput';
 import ImageCapture from '@/components/ImageCapture';
 import GradingResult from '@/components/GradingResult';
-import { splitOcrLines } from '@/lib/grading';
 import { GradingOptions, MultiGradeResult } from '@/types';
 
 type Step = 'input' | 'capture' | 'result';
@@ -55,21 +54,12 @@ export default function Home() {
       const rawOcrText: string = ocrJson.text ?? '';
       setOcrText(rawOcrText);
 
-      // Step 2: GPT 채점 - 정답과 비교
+      // Step 2: GPT 채점 (서버에서 OCR 정제 + 채점 통합 처리)
       setLoadingStep('grade');
-      const ocrLines = splitOcrLines(rawOcrText);
-      const activeQuestions = answers
-        .map((correct, i) => ({
-          correct: correct.trim(),
-          student: ocrLines[i] ?? '',
-          originalIndex: i,
-        }))
-        .filter((q) => q.correct.length > 0);
-
       const gradeRes = await fetch('/api/grade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions: activeQuestions, ocrText: rawOcrText }),
+        body: JSON.stringify({ answers, ocrText: rawOcrText }),
       });
       const gradeJson = await gradeRes.json();
 
@@ -104,7 +94,11 @@ export default function Home() {
   const stepIndex = step === 'input' ? 0 : step === 'capture' ? 1 : 2;
 
   const loadingMessage =
-    loadingStep === 'ocr' ? '손글씨 인식 중...' : loadingStep === 'grade' ? 'AI 채점 중...' : '';
+    loadingStep === 'ocr'
+      ? '손글씨 인식 중...'
+      : loadingStep === 'grade'
+      ? 'OCR 정제 후 AI 채점 중...'
+      : '';
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center py-6 px-4">
