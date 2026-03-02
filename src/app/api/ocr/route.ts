@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// GPT-4o Vision으로 그리드 방식 받아쓰기 시험지 인식
-// CLOVA OCR 대비 장점: 이미지 전체 맥락 이해, 한국어 손글씨에 강함, 문항 번호 기준 구조화
+// Gemini 2.5 Flash Vision으로 그리드 방식 받아쓰기 시험지 인식
+// 장점: GPT-4o 대비 빠름, 저렴, 멀티모달 인식 성능 우수
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'OPENAI_API_KEY가 없습니다.' },
+      { error: 'GEMINI_API_KEY가 없습니다. .env.local에 GEMINI_API_KEY를 설정해주세요.' },
       { status: 500 },
     );
   }
@@ -45,33 +45,30 @@ export async function POST(req: NextRequest) {
     'JSON만 출력 (다른 설명 없음):\n' +
     '{"1":"학생이 쓴 답","2":"학생이 쓴 답","3":"학생이 쓴 답",...}';
 
-  let visionRes: Response;
+  let geminiRes: Response;
   try {
-    visionRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
-              },
-            ],
+    geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 600,
+            responseMimeType: 'application/json',
           },
-        ],
-        max_tokens: 600,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-      }),
-    });
+        }),
+      },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
@@ -80,18 +77,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!visionRes.ok) {
-    const errText = await visionRes.text();
-    console.error('GPT-4o Vision OCR error:', errText);
+  if (!geminiRes.ok) {
+    const errText = await geminiRes.text();
+    console.error('Gemini OCR error:', errText);
     return NextResponse.json(
-      { error: `OCR API 오류 (${visionRes.status}): ${errText}` },
-      { status: visionRes.status },
+      { error: `OCR API 오류 (${geminiRes.status}): ${errText}` },
+      { status: geminiRes.status },
     );
   }
 
-  const data = await visionRes.json();
-  const content: string = data.choices?.[0]?.message?.content ?? '{}';
-  console.log('[ocr] vision result:', content);
+  const data = await geminiRes.json();
+  const content: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  console.log('[ocr] gemini result:', content);
 
   let lines: Record<string, string>;
   try {
@@ -103,7 +100,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // text: 사람이 읽기 좋은 형태로 변환 (기존 인터페이스 호환)
+  // text: 사람이 읽기 좋은 형태 (기존 인터페이스 호환)
   const text = Object.entries(lines)
     .sort(([a], [b]) => Number(a) - Number(b))
     .map(([num, answer]) => `${num} ${answer}`)

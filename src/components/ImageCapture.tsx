@@ -8,6 +8,48 @@ interface ImageCaptureProps {
   loading: boolean;
 }
 
+// 그레이스케일 변환 후 임계값(threshold) 처리
+// 연필 손글씨(어두움)는 유지하고, 공책 격자선(밝음)은 흰색으로 날려 인식률 향상
+async function applyThreshold(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        // 그레이스케일 변환
+        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        // 임계값 150: 연필 글씨(~50-120)는 검정, 공책 선/배경(~160-255)은 흰색
+        const binary = gray < 150 ? 0 : 255;
+        data[i] = data[i + 1] = data[i + 2] = binary;
+        // alpha 유지
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      URL.revokeObjectURL(url);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('이미지 변환 실패'));
+          resolve(new File([blob], 'preprocessed.jpg', { type: 'image/jpeg' }));
+        },
+        'image/jpeg',
+        0.95,
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('이미지 로드 실패')); };
+    img.src = url;
+  });
+}
+
 async function applyRotation(file: File, degrees: number): Promise<File> {
   if (degrees === 0) return file;
   return new Promise((resolve, reject) => {
@@ -76,7 +118,8 @@ export default function ImageCapture({ onGrade, onBack, loading }: ImageCaptureP
   async function handleGrade() {
     if (!selectedFile) return;
     const rotated = await applyRotation(selectedFile, rotation);
-    onGrade(rotated);
+    const preprocessed = await applyThreshold(rotated);
+    onGrade(preprocessed);
   }
 
   return (
