@@ -110,9 +110,9 @@ async function gradeWithGpt(
   const data = await res.json();
   const content: string = data.choices?.[0]?.message?.content ?? '{}';
   const parsed = JSON.parse(content) as {
-    results?: { tokens?: { correct: string; student: string; status: string }[] }[];
+    results?: { tokens: { correct: string; student: string; status: string }[] }[];
   };
-  return parsed.results ?? [];
+  return (parsed.results ?? []).map((r) => ({ tokens: r.tokens ?? [] }));
 }
 
 // ─── Main handler ────────────────────────────────────────────────────────────
