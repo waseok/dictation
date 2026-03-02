@@ -13,7 +13,7 @@ const QUESTION_COUNT = 10;
 
 const DEFAULT_OPTIONS: GradingOptions = {
   ignorePunctuation: false,
-  skipHeaderLine: true,
+  skipHeaderLine: false,
 };
 
 export default function Home() {
@@ -21,6 +21,7 @@ export default function Home() {
   const [answers, setAnswers] = useState<string[]>(Array(QUESTION_COUNT).fill(''));
   const [options, setOptions] = useState<GradingOptions>(DEFAULT_OPTIONS);
   const [gradeResult, setGradeResult] = useState<MultiGradeResult | null>(null);
+  const [ocrText, setOcrText] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,8 +50,9 @@ export default function Home() {
         return;
       }
 
-      const ocrText: string = json.text ?? '';
-      const result = gradeMultiple(answers, ocrText, options);
+      const rawOcrText: string = json.text ?? '';
+      setOcrText(rawOcrText);
+      const result = gradeMultiple(answers, rawOcrText, options);
       setGradeResult(result);
       setStep('result');
     } catch {
@@ -136,6 +138,7 @@ export default function Home() {
           {step === 'result' && gradeResult && (
             <GradingResult
               result={gradeResult}
+              ocrText={ocrText}
               onReset={handleReset}
               onNewStudent={handleNewStudent}
             />
@@ -143,7 +146,7 @@ export default function Home() {
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          Powered by Naver CLOVA OCR
+          Powered by GPT-4o Vision
         </p>
       </div>
     </main>

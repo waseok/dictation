@@ -217,8 +217,8 @@ export function gradeMultiple(
     .map((answer, i) => ({ answer, originalIndex: i }))
     .filter(({ answer }) => answer.trim().length > 0);
 
-  const questions: QuestionResult[] = activeAnswers.map(({ answer, originalIndex }, i) => {
-    const studentLine = ocrLines[i] ?? '';
+  const questions: QuestionResult[] = activeAnswers.map(({ answer, originalIndex }) => {
+    const studentLine = ocrLines[originalIndex] ?? '';
     return {
       questionNumber: originalIndex + 1,
       correctAnswer: answer,

@@ -6,6 +6,7 @@ import DiffView from './DiffView';
 
 interface GradingResultProps {
   result: MultiGradeResult;
+  ocrText?: string;
   onReset: () => void;
   onNewStudent: () => void;
 }
@@ -68,9 +69,10 @@ function QuestionRow({ q }: { q: QuestionResult }) {
   );
 }
 
-export default function GradingResult({ result, onReset, onNewStudent }: GradingResultProps) {
+export default function GradingResult({ result, ocrText, onReset, onNewStudent }: GradingResultProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
+  const [showOcr, setShowOcr] = useState(false);
 
   const totalCorrect = result.questions.reduce((s, q) => s + q.result.correctCount, 0);
   const totalWords = result.questions.reduce((s, q) => s + q.result.totalCount, 0);
@@ -162,6 +164,24 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-400 mr-1" />띄어쓰기 오류</span>
         <span><span className="inline-block w-2 h-2 rounded-sm bg-gray-300 mr-1" />누락</span>
       </div>
+
+      {/* OCR debug panel */}
+      {ocrText && (
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowOcr((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 bg-gray-50 hover:bg-gray-100 text-xs text-gray-500"
+          >
+            <span>GPT-4o 인식 원문 보기</span>
+            <span>{showOcr ? '▲' : '▼'}</span>
+          </button>
+          {showOcr && (
+            <pre className="px-4 py-3 text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white">
+              {ocrText}
+            </pre>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2">
