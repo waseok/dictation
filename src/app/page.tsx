@@ -96,7 +96,7 @@ export default function Home() {
 
   const loadingMessage =
     loadingStep === 'ocr'
-      ? 'Gemini 2.5 Flash로 손글씨 인식 중...'
+      ? 'Gemini 3 Flash로 손글씨 인식 중...'
       : loadingStep === 'grade'
       ? 'AI 채점 중...'
       : '';
@@ -176,7 +176,7 @@ export default function Home() {
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          Gemini 2.5 Flash OCR + 채점
+          Gemini 3 Flash OCR + 채점
         </p>
       </div>
     </main>

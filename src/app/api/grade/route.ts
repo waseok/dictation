@@ -3,9 +3,9 @@ import { splitOcrLines } from '@/lib/grading';
 import { GradeToken, GradeResult, QuestionResult, MultiGradeResult } from '@/types';
 
 const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent';
 
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
+async function callGemini(prompt: string, apiKey: string, maxOutputTokens = 4096): Promise<string> {
   const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -13,7 +13,7 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0,
-        maxOutputTokens: 2000,
+        maxOutputTokens,
         responseMimeType: 'application/json',
       },
     }),
@@ -90,7 +90,7 @@ async function gradeWithGemini(
     '출력:\n' +
     '{"results":[{"tokens":[{"correct":"어절","student":"학생어절","status":"correct|spelling-error|spacing-error|missing"}]}]}';
 
-  const content = await callGemini(prompt, apiKey);
+  const content = await callGemini(prompt, apiKey, 8192);
   console.log('[grade] result:', content);
   const parsed = JSON.parse(content) as {
     results?: { tokens: { correct: string; student: string; status: string }[] }[];
