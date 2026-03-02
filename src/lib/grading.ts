@@ -1,4 +1,10 @@
-import { GradeResult, GradeToken, TokenStatus, MultiGradeResult, QuestionResult } from '@/types';
+import { GradeResult, GradeToken, TokenStatus, MultiGradeResult, QuestionResult, GradingOptions } from '@/types';
+
+const PUNCTUATION_RE = /[.,!?。、·…""''「」『』〈〉《》【】~]/g;
+
+function stripPunctuation(text: string): string {
+  return text.replace(PUNCTUATION_RE, '').replace(/\s+/g, ' ').trim();
+}
 
 function tokenize(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -40,16 +46,14 @@ function lcsAlign(a: string[], b: string[]): [number, number][] {
   return pairs;
 }
 
-// Detect if spacing-only error: removing spaces from both yields the same string
-function isSpacingError(correct: string, student: string): boolean {
-  return removeSpaces(correct) === removeSpaces(student) && correct !== student;
-}
-
-export function grade(correctText: string, studentText: string): GradeResult {
-  const correctWords = tokenize(correctText);
-  const studentWords = tokenize(studentText);
-
-  const tokens: GradeToken[] = [];
+export function grade(
+  correctText: string,
+  studentText: string,
+  ignorePunctuation = false,
+): GradeResult {
+  const norm = ignorePunctuation ? stripPunctuation : (t: string) => t;
+  const correctWords = tokenize(norm(correctText));
+  const studentWords = tokenize(norm(studentText));
 
   if (correctWords.length === 0) {
     return {
@@ -64,26 +68,19 @@ export function grade(correctText: string, studentText: string): GradeResult {
     };
   }
 
-  // Align using LCS on exact word matches
   const alignedPairs = lcsAlign(correctWords, studentWords);
-
-  // Build a map: correctIdx -> studentIdx for exact matches
   const exactMatchMap = new Map<number, number>();
   for (const [ci, si] of alignedPairs) {
     exactMatchMap.set(ci, si);
   }
 
-  // For unmatched correct words, try to find a spacing-error match greedily
   const usedStudentIndices = new Set(alignedPairs.map(([, si]) => si));
-
-  // Map correctIdx -> {studentIdx, status}
   const matchResult = new Map<number, { studentIdx: number; status: TokenStatus }>();
 
   for (const [ci, si] of alignedPairs) {
     matchResult.set(ci, { studentIdx: si, status: 'correct' });
   }
 
-  // For remaining correct words, look for best student word match
   for (let ci = 0; ci < correctWords.length; ci++) {
     if (matchResult.has(ci)) continue;
 
@@ -91,7 +88,6 @@ export function grade(correctText: string, studentText: string): GradeResult {
     let bestSi = -1;
     let bestStatus: TokenStatus = 'missing';
 
-    // Search in student words not yet used, preferring nearby indices
     for (let si = 0; si < studentWords.length; si++) {
       if (usedStudentIndices.has(si)) continue;
       const sw = studentWords[si];
@@ -101,17 +97,12 @@ export function grade(correctText: string, studentText: string): GradeResult {
         bestStatus = 'correct';
         break;
       }
-      // Loop only reaches here if sw !== cw (no exact match yet)
       if (removeSpaces(cw) === removeSpaces(sw)) {
         bestSi = si;
         bestStatus = 'spacing-error';
-      } else if (bestSi === -1) {
-        // Tentative spelling error match — we'll assign the closest unmatched student word
-        // Only for words nearby (within ±2 positions)
-        if (Math.abs(si - ci) <= 2) {
-          bestSi = si;
-          bestStatus = 'spelling-error';
-        }
+      } else if (bestSi === -1 && Math.abs(si - ci) <= 2) {
+        bestSi = si;
+        bestStatus = 'spelling-error';
       }
     }
 
@@ -123,7 +114,7 @@ export function grade(correctText: string, studentText: string): GradeResult {
     }
   }
 
-  // Build tokens in order of correct words
+  const tokens: GradeToken[] = [];
   let correctCount = 0;
   let spacingErrorCount = 0;
   let spellingErrorCount = 0;
@@ -134,17 +125,11 @@ export function grade(correctText: string, studentText: string): GradeResult {
     const match = matchResult.get(ci)!;
     const sw = match.studentIdx >= 0 ? studentWords[match.studentIdx] : '';
 
-    let status = match.status;
-    // Re-verify status
-    if (sw === cw) {
-      status = 'correct';
-    } else if (sw !== '' && isSpacingError(cw, sw)) {
-      status = 'spacing-error';
-    } else if (sw !== '') {
-      status = 'spelling-error';
-    } else {
-      status = 'missing';
-    }
+    let status: TokenStatus;
+    if (sw === cw) status = 'correct';
+    else if (sw !== '' && removeSpaces(cw) === removeSpaces(sw)) status = 'spacing-error';
+    else if (sw !== '') status = 'spelling-error';
+    else status = 'missing';
 
     tokens.push({ correct: cw, student: sw, status });
 
@@ -155,7 +140,7 @@ export function grade(correctText: string, studentText: string): GradeResult {
   }
 
   const totalCount = correctWords.length;
-  const score = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
+  const score = Math.round((correctCount / totalCount) * 100);
 
   return {
     score,
@@ -169,20 +154,26 @@ export function grade(correctText: string, studentText: string): GradeResult {
   };
 }
 
-// Remove leading question numbers like "1.", "1)", "①", "②", etc.
+// Remove leading question numbers like "1.", "1)", "①" etc.
 function cleanAnswerLine(line: string): string {
   return line.replace(/^\s*(\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '').trim();
 }
 
-// Split OCR text into per-question lines
-export function splitOcrLines(text: string): string[] {
-  return text.split('\n').map(cleanAnswerLine);
+export function splitOcrLines(text: string, skipFirstLine = false): string[] {
+  const lines = text.split('\n').map(cleanAnswerLine);
+  return skipFirstLine ? lines.slice(1) : lines;
 }
 
-// Grade multiple questions from a single OCR text
-export function gradeMultiple(correctAnswers: string[], ocrText: string): MultiGradeResult {
-  const ocrLines = splitOcrLines(ocrText);
-  const activeAnswers = correctAnswers.map((a, i) => ({ answer: a, originalIndex: i }))
+export function gradeMultiple(
+  correctAnswers: string[],
+  ocrText: string,
+  options: Partial<GradingOptions> = {},
+): MultiGradeResult {
+  const { ignorePunctuation = false, skipHeaderLine = false } = options;
+  const ocrLines = splitOcrLines(ocrText, skipHeaderLine);
+
+  const activeAnswers = correctAnswers
+    .map((answer, i) => ({ answer, originalIndex: i }))
     .filter(({ answer }) => answer.trim().length > 0);
 
   const questions: QuestionResult[] = activeAnswers.map(({ answer, originalIndex }, i) => {
@@ -190,7 +181,7 @@ export function gradeMultiple(correctAnswers: string[], ocrText: string): MultiG
     return {
       questionNumber: originalIndex + 1,
       correctAnswer: answer,
-      result: grade(answer, studentLine),
+      result: grade(answer, studentLine, ignorePunctuation),
     };
   });
 

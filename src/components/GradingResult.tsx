@@ -7,6 +7,7 @@ import DiffView from './DiffView';
 interface GradingResultProps {
   result: MultiGradeResult;
   onReset: () => void;
+  onNewStudent: () => void;
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -67,7 +68,7 @@ function QuestionRow({ q }: { q: QuestionResult }) {
   );
 }
 
-export default function GradingResult({ result, onReset }: GradingResultProps) {
+export default function GradingResult({ result, onReset, onNewStudent }: GradingResultProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -169,7 +170,14 @@ export default function GradingResult({ result, onReset }: GradingResultProps) {
           className="flex-1 py-3 rounded-xl font-semibold text-gray-600 border border-gray-300
                      hover:bg-gray-50 active:bg-gray-100 transition-colors"
         >
-          다시 채점
+          다시 촬영
+        </button>
+        <button
+          onClick={onNewStudent}
+          className="flex-1 py-3 rounded-xl font-semibold text-white
+                     bg-blue-500 hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        >
+          다음 학생 →
         </button>
         <button
           onClick={handleDownload}

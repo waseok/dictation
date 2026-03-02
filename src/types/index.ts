@@ -27,3 +27,8 @@ export interface MultiGradeResult {
   questions: QuestionResult[];
   totalScore: number;
 }
+
+export interface GradingOptions {
+  ignorePunctuation: boolean;
+  skipHeaderLine: boolean;
+}

@@ -5,15 +5,21 @@ import AnswerInput from '@/components/AnswerInput';
 import ImageCapture from '@/components/ImageCapture';
 import GradingResult from '@/components/GradingResult';
 import { gradeMultiple } from '@/lib/grading';
-import { MultiGradeResult } from '@/types';
+import { GradingOptions, MultiGradeResult } from '@/types';
 
 type Step = 'input' | 'capture' | 'result';
 
 const QUESTION_COUNT = 10;
 
+const DEFAULT_OPTIONS: GradingOptions = {
+  ignorePunctuation: false,
+  skipHeaderLine: true,
+};
+
 export default function Home() {
   const [step, setStep] = useState<Step>('input');
   const [answers, setAnswers] = useState<string[]>(Array(QUESTION_COUNT).fill(''));
+  const [options, setOptions] = useState<GradingOptions>(DEFAULT_OPTIONS);
   const [gradeResult, setGradeResult] = useState<MultiGradeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +50,7 @@ export default function Home() {
       }
 
       const ocrText: string = json.text ?? '';
-      const result = gradeMultiple(answers, ocrText);
+      const result = gradeMultiple(answers, ocrText, options);
       setGradeResult(result);
       setStep('result');
     } catch {
@@ -55,10 +61,15 @@ export default function Home() {
   }
 
   function handleReset() {
-    setStep('input');
+    setStep('capture');
     setGradeResult(null);
     setError(null);
-    setAnswers(Array(QUESTION_COUNT).fill(''));
+  }
+
+  function handleNewStudent() {
+    setStep('capture');
+    setGradeResult(null);
+    setError(null);
   }
 
   const stepLabels = ['정답 입력', '사진 촬영', '채점 결과'];
@@ -101,6 +112,8 @@ export default function Home() {
             <AnswerInput
               answers={answers}
               onChange={handleAnswerChange}
+              options={options}
+              onOptionsChange={setOptions}
               onNext={() => setStep('capture')}
             />
           )}
@@ -121,7 +134,11 @@ export default function Home() {
           )}
 
           {step === 'result' && gradeResult && (
-            <GradingResult result={gradeResult} onReset={handleReset} />
+            <GradingResult
+              result={gradeResult}
+              onReset={handleReset}
+              onNewStudent={handleNewStudent}
+            />
           )}
         </div>
 
