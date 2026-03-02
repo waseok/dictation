@@ -168,6 +168,28 @@ const CIRCLE_START_RE = new RegExp(`^([${CIRCLE_NUMS}])\\s*(.*)`);
 // of the previous question, which fixes the "one answer split into two OCR lines"
 // alignment bug. Falls back to simple line-split if no question numbers are found.
 export function splitOcrLines(text: string, skipFirstLine = false): string[] {
+  // Handle JSON format: { "1": "answer1", "2": "answer2", ... }
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const entries = Object.entries(parsed as Record<string, unknown>)
+          .map(([k, v]) => ({ num: parseInt(k, 10), val: String(v) }))
+          .filter(({ num }) => !isNaN(num));
+        if (entries.length > 0) {
+          const maxQ = Math.max(...entries.map((e) => e.num));
+          return Array.from({ length: maxQ }, (_, i) => {
+            const entry = entries.find((e) => e.num === i + 1);
+            return entry ? entry.val : '';
+          });
+        }
+      }
+    } catch {
+      // Not valid JSON, continue to line-based parsing
+    }
+  }
+
   const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
   const questionMap = new Map<number, string>();
