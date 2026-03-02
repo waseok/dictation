@@ -52,14 +52,15 @@ export default function Home() {
       }
 
       const rawOcrText: string = ocrJson.text ?? '';
+      const visionLines: Record<string, string> | undefined = ocrJson.lines;
       setOcrText(rawOcrText);
 
-      // Step 2: GPT 채점 (서버에서 OCR 정제 + 채점 통합 처리)
+      // Step 2: GPT-4o 채점 (Vision OCR 결과 lines가 있으면 normalize 단계 생략)
       setLoadingStep('grade');
       const gradeRes = await fetch('/api/grade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, ocrText: rawOcrText }),
+        body: JSON.stringify({ answers, ocrText: rawOcrText, lines: visionLines }),
       });
       const gradeJson = await gradeRes.json();
 
@@ -95,9 +96,9 @@ export default function Home() {
 
   const loadingMessage =
     loadingStep === 'ocr'
-      ? '손글씨 인식 중...'
+      ? 'GPT-4o Vision으로 손글씨 인식 중...'
       : loadingStep === 'grade'
-      ? 'OCR 정제 후 AI 채점 중...'
+      ? 'AI 채점 중...'
       : '';
 
   return (
@@ -175,7 +176,7 @@ export default function Home() {
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          CLOVA OCR + GPT-4o 채점
+          GPT-4o Vision + GPT-4o 채점
         </p>
       </div>
     </main>

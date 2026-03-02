@@ -1,29 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
 
-interface ClovaField {
-  inferText: string;
-  lineBreak: boolean;
-}
-
-interface ClovaImage {
-  inferResult: string;
-  message: string;
-  fields: ClovaField[];
-}
-
-interface ClovaResponse {
-  images: ClovaImage[];
-}
+// GPT-4o Vision으로 그리드 방식 받아쓰기 시험지 인식
+// CLOVA OCR 대비 장점: 이미지 전체 맥락 이해, 한국어 손글씨에 강함, 문항 번호 기준 구조화
 
 export async function POST(req: NextRequest) {
-  const invokeUrl = process.env.CLOVA_OCR_INVOKE_URL;
-  const secret = process.env.CLOVA_OCR_SECRET;
-
-  if (!invokeUrl || !secret) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
     return NextResponse.json(
-      { error: 'OCR API 설정이 없습니다. .env.local에 CLOVA_OCR_INVOKE_URL과 CLOVA_OCR_SECRET을 설정해주세요.' },
-      { status: 500 }
+      { error: 'OPENAI_API_KEY가 없습니다.' },
+      { status: 500 },
     );
   }
 
@@ -41,59 +26,88 @@ export async function POST(req: NextRequest) {
 
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString('base64');
+  const mimeType = file.type || 'image/jpeg';
 
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
-  const format = ext === 'jpg' ? 'jpeg' : ext;
+  const prompt =
+    '이 이미지는 초등학생 한글 받아쓰기 시험지야.\n' +
+    '학생이 칸(그리드)에 한 글자씩 손으로 썼어.\n\n' +
+    '━━━ 절대 규칙 ━━━\n' +
+    '학생이 쓴 글자를 절대 수정하지 마.\n' +
+    '맞춤법·철자 오류가 있어도 그대로 읽어야 해.\n' +
+    '예) 학생이 "되요"로 썼으면 → "되요" (❌ "돼요"로 수정 금지)\n' +
+    '예) 학생이 "맞추다"로 썼으면 → "맞추다" (❌ "맞히다"로 수정 금지)\n' +
+    '예) 학생이 칸을 비웠으면 → "" (빈 문자열)\n\n' +
+    '━━━ 인식 방법 ━━━\n' +
+    '- 왼쪽 또는 위쪽에 있는 문항 번호(1, 2, 3...)를 기준으로 각 답을 읽어\n' +
+    '- 각 문항의 칸들을 왼쪽→오른쪽 순서로 이어 읽어\n' +
+    '- 어절(단어) 사이 빈 칸이 있으면 띄어쓰기로 표시해\n' +
+    '- 글자를 읽기 어려우면 가장 비슷한 한글 글자로 읽어\n\n' +
+    'JSON만 출력 (다른 설명 없음):\n' +
+    '{"1":"학생이 쓴 답","2":"학생이 쓴 답","3":"학생이 쓴 답",...}';
 
-  const body = {
-    version: 'V2',
-    requestId: randomUUID(),
-    timestamp: 0,
-    lang: 'ko',
-    images: [{ format, name: file.name, data: base64 }],
-  };
-
-  let clovaRes: Response;
+  let visionRes: Response;
   try {
-    clovaRes = await fetch(invokeUrl, {
+    visionRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-OCR-SECRET': secret,
+        'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
+              },
+            ],
+          },
+        ],
+        max_tokens: 600,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: `OCR 서버에 연결할 수 없습니다. (${message})` },
-      { status: 502 }
+      { status: 502 },
     );
   }
 
-  if (!clovaRes.ok) {
-    const errText = await clovaRes.text();
-    console.error('CLOVA OCR error:', errText);
+  if (!visionRes.ok) {
+    const errText = await visionRes.text();
+    console.error('GPT-4o Vision OCR error:', errText);
     return NextResponse.json(
-      { error: `OCR API 오류 (${clovaRes.status}): ${errText}` },
-      { status: clovaRes.status }
+      { error: `OCR API 오류 (${visionRes.status}): ${errText}` },
+      { status: visionRes.status },
     );
   }
 
-  const data: ClovaResponse = await clovaRes.json();
-  const image = data.images?.[0];
+  const data = await visionRes.json();
+  const content: string = data.choices?.[0]?.message?.content ?? '{}';
+  console.log('[ocr] vision result:', content);
 
-  if (!image || image.inferResult !== 'SUCCESS') {
+  let lines: Record<string, string>;
+  try {
+    lines = JSON.parse(content) as Record<string, string>;
+  } catch {
     return NextResponse.json(
-      { error: `OCR 인식 실패: ${image?.message ?? '알 수 없는 오류'}` },
-      { status: 422 }
+      { error: 'OCR 결과를 파싱할 수 없습니다.' },
+      { status: 422 },
     );
   }
 
-  const text = (image.fields ?? [])
-    .map((field) => field.inferText + (field.lineBreak ? '\n' : ' '))
-    .join('')
-    .trim();
+  // text: 사람이 읽기 좋은 형태로 변환 (기존 인터페이스 호환)
+  const text = Object.entries(lines)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([num, answer]) => `${num} ${answer}`)
+    .join('\n');
 
-  return NextResponse.json({ text });
+  return NextResponse.json({ text, lines });
 }

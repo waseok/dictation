@@ -122,8 +122,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'OPENAI_API_KEY가 없습니다.' }, { status: 500 });
   }
 
-  const body = await req.json() as { answers: string[]; ocrText: string };
-  const { answers, ocrText } = body;
+  const body = await req.json() as {
+    answers: string[];
+    ocrText: string;
+    lines?: Record<string, string>; // GPT-4o Vision OCR 결과 (있으면 normalize 생략)
+  };
+  const { answers, ocrText, lines: visionLines } = body;
 
   if (!answers?.length || !ocrText) {
     return NextResponse.json({ error: '채점할 문항이나 OCR 텍스트가 없습니다.' }, { status: 400 });
@@ -133,24 +137,31 @@ export async function POST(req: NextRequest) {
     .map((correct, i) => ({ correct: correct.trim(), originalIndex: i }))
     .filter((q) => q.correct.length > 0);
 
-  // Step 1: GPT-4o-mini로 CLOVA OCR 원문 정제
-  // 정제 실패 시 splitOcrLines() 결과로 폴백 (서비스 중단 방지)
-  let normalizedMap: Record<string, string> = {};
+  // Step 1: 학생 답 확정
+  // GPT-4o Vision이 이미 문항별로 인식했으면 그대로 사용, 없으면 GPT-4o-mini로 정제
+  let studentAnswerMap: Record<string, string> = {};
   let normalizeError: string | null = null;
-  try {
-    normalizedMap = await normalizeOcrText(ocrText, activeAnswers.length, apiKey);
-  } catch (err) {
-    normalizeError = err instanceof Error ? err.message : String(err);
-    console.error('[normalize] failed, falling back to splitOcrLines:', normalizeError);
-    const fallbackLines = splitOcrLines(ocrText);
-    activeAnswers.forEach((q, i) => {
-      normalizedMap[String(q.originalIndex + 1)] = fallbackLines[i] ?? '';
-    });
+
+  if (visionLines && Object.keys(visionLines).length > 0) {
+    // Vision OCR 경로: 이미 구조화된 결과 직접 사용
+    studentAnswerMap = visionLines;
+  } else {
+    // 폴백: GPT-4o-mini로 CLOVA 원문 정제
+    try {
+      studentAnswerMap = await normalizeOcrText(ocrText, activeAnswers.length, apiKey);
+    } catch (err) {
+      normalizeError = err instanceof Error ? err.message : String(err);
+      console.error('[normalize] failed, falling back to splitOcrLines:', normalizeError);
+      const fallbackLines = splitOcrLines(ocrText);
+      activeAnswers.forEach((q, i) => {
+        studentAnswerMap[String(q.originalIndex + 1)] = fallbackLines[i] ?? '';
+      });
+    }
   }
 
   const questions: GradeQuestion[] = activeAnswers.map((q) => ({
     correct: q.correct,
-    student: normalizedMap[String(q.originalIndex + 1)] ?? '',
+    student: studentAnswerMap[String(q.originalIndex + 1)] ?? '',
     originalIndex: q.originalIndex,
   }));
 
