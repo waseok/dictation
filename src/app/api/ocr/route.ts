@@ -100,8 +100,9 @@ export async function POST(req: NextRequest) {
   try {
     lines = JSON.parse(content) as Record<string, string>;
   } catch {
+    console.error('[ocr] parse failed. raw parts:', JSON.stringify(data.candidates?.[0]?.content?.parts));
     return NextResponse.json(
-      { error: 'OCR 결과를 파싱할 수 없습니다.' },
+      { error: `OCR 파싱 실패. 응답: ${content.slice(0, 300)}` },
       { status: 422 },
     );
   }
