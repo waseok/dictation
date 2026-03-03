@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GradingOptions } from '@/types';
 
 const SLOTS_KEY = 'dictation-slots';
 const MAX_SLOTS = 10;
+const QUESTION_COUNT = 10;
 
 interface Slot {
   name: string;
@@ -34,6 +35,30 @@ function persistSlots(slots: Slot[]) {
   localStorage.setItem(SLOTS_KEY, JSON.stringify(slots));
 }
 
+/** CSV 한 줄 파싱 (따옴표 처리 포함) */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current); current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function csvCell(v: string) {
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
 export default function AnswerInput({
   answers,
   onChange,
@@ -44,6 +69,8 @@ export default function AnswerInput({
   const [slots, setSlots] = useState<Slot[]>([]);
   const [showLoad, setShowLoad] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setSlots(getSlots());
@@ -51,9 +78,8 @@ export default function AnswerInput({
 
   const hasAny = answers.some((a) => a.trim().length > 0);
 
-  /* 저장하기 – 바로 저장, 이름은 자동 */
   function handleSave() {
-    const existing = getSlots(); // 최신 localStorage 값 재확인
+    const existing = getSlots();
     const name = `저장 ${existing.length + 1}`;
     const slot: Slot = { name, answers: [...answers], options };
     const next = [...existing, slot].slice(0, MAX_SLOTS);
@@ -77,6 +103,68 @@ export default function AnswerInput({
     if (next.length === 0) setShowLoad(false);
   }
 
+  /* ── CSV 내보내기 ── */
+  function handleExport() {
+    const existing = getSlots();
+    if (existing.length === 0) return;
+
+    const header = ['이름', ...Array.from({ length: QUESTION_COUNT }, (_, i) => `${i + 1}번`)];
+    const rows = existing.map((slot) => [slot.name, ...slot.answers]);
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+
+    const bom = '\uFEFF'; // Excel 한글 깨짐 방지
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '받아쓰기정답.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* ── CSV 가져오기 ── */
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        let text = (evt.target?.result as string) ?? '';
+        if (text.startsWith('\uFEFF')) text = text.slice(1); // BOM 제거
+
+        const lines = text.split(/\r?\n/).filter((l) => l.trim());
+        if (lines.length < 2) { setImportMsg('데이터가 없습니다.'); return; }
+
+        const imported: Slot[] = lines
+          .slice(1) // 헤더 행 제외
+          .map((line) => {
+            const cells = parseCSVLine(line);
+            const name = cells[0]?.trim() || '가져온 정답';
+            const ans = Array.from({ length: QUESTION_COUNT }, (_, i) => cells[i + 1]?.trim() ?? '');
+            return { name, answers: ans, options: { ignorePunctuation: false, skipHeaderLine: true } };
+          })
+          .filter((s) => s.answers.some((a) => a.length > 0));
+
+        if (imported.length === 0) { setImportMsg('유효한 데이터가 없습니다.'); return; }
+
+        const existing = getSlots();
+        const next = [...existing, ...imported].slice(0, MAX_SLOTS);
+        persistSlots(next);
+        setSlots(next);
+        setImportMsg(`${imported.length}개 정답 가져오기 완료!`);
+        setTimeout(() => setImportMsg(null), 2500);
+      } catch {
+        setImportMsg('파일을 읽는 중 오류가 발생했습니다.');
+        setTimeout(() => setImportMsg(null), 2500);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+    e.target.value = '';
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -86,7 +174,7 @@ export default function AnswerInput({
         </p>
       </div>
 
-      {/* Save / Load buttons */}
+      {/* Row 1: 불러오기 / 저장하기 */}
       <div className="flex gap-2">
         <button
           onClick={() => setShowLoad((v) => !v)}
@@ -109,6 +197,40 @@ export default function AnswerInput({
           {saveFlash ? '저장 완료 ✓' : slots.length >= MAX_SLOTS ? `저장 (${MAX_SLOTS}/${MAX_SLOTS})` : '저장하기'}
         </button>
       </div>
+
+      {/* Row 2: CSV 내보내기 / 가져오기 */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleExport}
+          disabled={slots.length === 0}
+          className="flex-1 py-1.5 rounded-xl text-xs font-semibold text-gray-500
+                     border border-gray-200 hover:bg-gray-50 transition-colors
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          CSV 내보내기 ↓
+        </button>
+        <label
+          className="flex-1 py-1.5 rounded-xl text-xs font-semibold text-gray-500
+                     border border-gray-200 hover:bg-gray-50 transition-colors
+                     text-center cursor-pointer"
+        >
+          CSV 가져오기 ↑
+          <input
+            ref={importRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleImport}
+          />
+        </label>
+      </div>
+
+      {/* Import feedback */}
+      {importMsg && (
+        <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 text-center">
+          {importMsg}
+        </div>
+      )}
 
       {/* Load panel */}
       {showLoad && slots.length > 0 && (
