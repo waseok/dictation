@@ -42,8 +42,7 @@ export default function AnswerInput({
   onNext,
 }: AnswerInputProps) {
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [panel, setPanel] = useState<'save' | 'load' | null>(null);
-  const [saveName, setSaveName] = useState('');
+  const [showLoad, setShowLoad] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
 
   useEffect(() => {
@@ -52,40 +51,30 @@ export default function AnswerInput({
 
   const hasAny = answers.some((a) => a.trim().length > 0);
 
-  function flashSaved() {
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 1500);
-  }
-
-  function doSave(overwriteIndex?: number) {
-    const name = saveName.trim() || `정답 ${slots.length + 1}`;
+  /* 저장하기 – 바로 저장, 이름은 자동 */
+  function handleSave() {
+    const existing = getSlots(); // 최신 localStorage 값 재확인
+    const name = `저장 ${existing.length + 1}`;
     const slot: Slot = { name, answers: [...answers], options };
-    let next: Slot[];
-    if (overwriteIndex !== undefined) {
-      next = [...slots];
-      next[overwriteIndex] = slot;
-    } else {
-      next = [...slots, slot].slice(0, MAX_SLOTS);
-    }
+    const next = [...existing, slot].slice(0, MAX_SLOTS);
     persistSlots(next);
     setSlots(next);
-    setSaveName('');
-    setPanel(null);
-    flashSaved();
+    setSaveFlash(true);
+    setTimeout(() => setSaveFlash(false), 1500);
   }
 
   function doLoad(i: number) {
     const slot = slots[i];
     slot.answers.forEach((a, idx) => onChange(idx, a));
     onOptionsChange(slot.options);
-    setPanel(null);
+    setShowLoad(false);
   }
 
   function doDelete(i: number) {
     const next = slots.filter((_, idx) => idx !== i);
     persistSlots(next);
     setSlots(next);
-    if (next.length === 0) setPanel(null);
+    if (next.length === 0) setShowLoad(false);
   }
 
   return (
@@ -100,7 +89,7 @@ export default function AnswerInput({
       {/* Save / Load buttons */}
       <div className="flex gap-2">
         <button
-          onClick={() => setPanel(panel === 'load' ? null : 'load')}
+          onClick={() => setShowLoad((v) => !v)}
           disabled={slots.length === 0}
           className="flex-1 py-2 rounded-xl text-sm font-semibold text-blue-700
                      border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors
@@ -109,67 +98,22 @@ export default function AnswerInput({
           불러오기 ({slots.length})
         </button>
         <button
-          onClick={() => setPanel(panel === 'save' ? null : 'save')}
-          disabled={!hasAny}
+          onClick={handleSave}
+          disabled={!hasAny || slots.length >= MAX_SLOTS}
           className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors
             ${saveFlash
               ? 'bg-green-500 text-white border border-green-500'
               : 'text-gray-600 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed'
             }`}
         >
-          {saveFlash ? '저장 완료 ✓' : `저장하기`}
+          {saveFlash ? '저장 완료 ✓' : slots.length >= MAX_SLOTS ? `저장 (${MAX_SLOTS}/${MAX_SLOTS})` : '저장하기'}
         </button>
       </div>
 
-      {/* Save panel */}
-      {panel === 'save' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-amber-800">
-            정답 저장 ({slots.length}/{MAX_SLOTS})
-          </p>
-          <input
-            type="text"
-            placeholder="저장 이름 (예: 3월 1주차 받아쓰기)"
-            value={saveName}
-            onChange={(e) => setSaveName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && slots.length < MAX_SLOTS && doSave()}
-            className="w-full px-3 py-2 border border-amber-200 rounded-lg text-sm
-                       focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-          />
-          {slots.length < MAX_SLOTS && (
-            <button
-              onClick={() => doSave()}
-              className="py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
-            >
-              새로 저장
-            </button>
-          )}
-          {slots.length > 0 && (
-            <>
-              <p className="text-xs text-gray-500 mt-1">기존 슬롯에 덮어쓰기:</p>
-              <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
-                {slots.map((slot, i) => (
-                  <button
-                    key={i}
-                    onClick={() => doSave(i)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left
-                               border border-gray-200 bg-white hover:bg-amber-50 transition-colors"
-                  >
-                    <span className="text-gray-400 text-xs w-4 shrink-0">{i + 1}.</span>
-                    <span className="flex-1 truncate">{slot.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">덮어쓰기</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {/* Load panel */}
-      {panel === 'load' && slots.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-blue-700">저장된 정답 ({slots.length}개)</p>
+      {showLoad && slots.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs font-semibold text-blue-700 mb-1">저장된 정답 ({slots.length}개)</p>
           <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
             {slots.map((slot, i) => (
               <div
