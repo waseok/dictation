@@ -1,5 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const MAX_RETRIES = 3;
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 2 ** attempt * 500)); // 1s, 2s, 4s
+    }
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (err) {
+      if (attempt === MAX_RETRIES) throw err;
+      continue;
+    }
+    if (res.status !== 503 && res.status !== 429) return res;
+    lastRes = res;
+  }
+  return lastRes!;
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -40,21 +61,23 @@ export async function POST(req: NextRequest) {
   const model = 'gemini-3-flash-preview';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+  const body = JSON.stringify({
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: base64 } },
+        ],
+      },
+    ],
+  });
+
   let geminiRes: Response;
   try {
-    geminiRes = await fetch(url, {
+    geminiRes = await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: base64 } },
-            ],
-          },
-        ],
-      }),
+      body,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -66,7 +89,15 @@ export async function POST(req: NextRequest) {
 
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
-    console.error('Gemini API error:', errText);
+    console.error('Gemini API error:', geminiRes.status, errText);
+
+    if (geminiRes.status === 503 || geminiRes.status === 429) {
+      return NextResponse.json(
+        { error: 'Gemini 서버가 일시적으로 혼잡합니다. 잠시 후 다시 시도해주세요.' },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
       { error: `Gemini API 오류 (${geminiRes.status}): ${errText}` },
       { status: geminiRes.status }

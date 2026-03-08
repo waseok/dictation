@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GradingOptions } from '@/types';
 
 const SLOTS_KEY = 'dictation-slots';
 const MAX_SLOTS = 10;
+const QUESTION_COUNT = 10;
 
 interface Slot {
   name: string;
@@ -34,6 +35,30 @@ function persistSlots(slots: Slot[]) {
   localStorage.setItem(SLOTS_KEY, JSON.stringify(slots));
 }
 
+/** CSV 한 줄 파싱 (따옴표 처리 포함) */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current); current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function csvCell(v: string) {
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
 export default function AnswerInput({
   answers,
   onChange,
@@ -42,9 +67,10 @@ export default function AnswerInput({
   onNext,
 }: AnswerInputProps) {
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [panel, setPanel] = useState<'save' | 'load' | null>(null);
-  const [saveName, setSaveName] = useState('');
+  const [showLoad, setShowLoad] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setSlots(getSlots());
@@ -52,40 +78,91 @@ export default function AnswerInput({
 
   const hasAny = answers.some((a) => a.trim().length > 0);
 
-  function flashSaved() {
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 1500);
-  }
-
-  function doSave(overwriteIndex?: number) {
-    const name = saveName.trim() || `정답 ${slots.length + 1}`;
+  function handleSave() {
+    const existing = getSlots();
+    const name = `저장 ${existing.length + 1}`;
     const slot: Slot = { name, answers: [...answers], options };
-    let next: Slot[];
-    if (overwriteIndex !== undefined) {
-      next = [...slots];
-      next[overwriteIndex] = slot;
-    } else {
-      next = [...slots, slot].slice(0, MAX_SLOTS);
-    }
+    const next = [...existing, slot].slice(0, MAX_SLOTS);
     persistSlots(next);
     setSlots(next);
-    setSaveName('');
-    setPanel(null);
-    flashSaved();
+    setSaveFlash(true);
+    setTimeout(() => setSaveFlash(false), 1500);
   }
 
   function doLoad(i: number) {
     const slot = slots[i];
     slot.answers.forEach((a, idx) => onChange(idx, a));
     onOptionsChange(slot.options);
-    setPanel(null);
+    setShowLoad(false);
   }
 
   function doDelete(i: number) {
     const next = slots.filter((_, idx) => idx !== i);
     persistSlots(next);
     setSlots(next);
-    if (next.length === 0) setPanel(null);
+    if (next.length === 0) setShowLoad(false);
+  }
+
+  /* ── CSV 내보내기 ── */
+  function handleExport() {
+    const existing = getSlots();
+    if (existing.length === 0) return;
+
+    const header = ['이름', ...Array.from({ length: QUESTION_COUNT }, (_, i) => `${i + 1}번`)];
+    const rows = existing.map((slot) => [slot.name, ...slot.answers]);
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+
+    const bom = '\uFEFF'; // Excel 한글 깨짐 방지
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '받아쓰기정답.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* ── CSV 가져오기 ── */
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        let text = (evt.target?.result as string) ?? '';
+        if (text.startsWith('\uFEFF')) text = text.slice(1); // BOM 제거
+
+        const lines = text.split(/\r?\n/).filter((l) => l.trim());
+        if (lines.length < 2) { setImportMsg('데이터가 없습니다.'); return; }
+
+        const imported: Slot[] = lines
+          .slice(1) // 헤더 행 제외
+          .map((line) => {
+            const cells = parseCSVLine(line);
+            const name = cells[0]?.trim() || '가져온 정답';
+            const ans = Array.from({ length: QUESTION_COUNT }, (_, i) => cells[i + 1]?.trim() ?? '');
+            return { name, answers: ans, options: { ignorePunctuation: false, skipHeaderLine: true } };
+          })
+          .filter((s) => s.answers.some((a) => a.length > 0));
+
+        if (imported.length === 0) { setImportMsg('유효한 데이터가 없습니다.'); return; }
+
+        const existing = getSlots();
+        const next = [...existing, ...imported].slice(0, MAX_SLOTS);
+        persistSlots(next);
+        setSlots(next);
+        setImportMsg(`${imported.length}개 정답 가져오기 완료!`);
+        setTimeout(() => setImportMsg(null), 2500);
+      } catch {
+        setImportMsg('파일을 읽는 중 오류가 발생했습니다.');
+        setTimeout(() => setImportMsg(null), 2500);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+    e.target.value = '';
   }
 
   return (
@@ -97,10 +174,10 @@ export default function AnswerInput({
         </p>
       </div>
 
-      {/* Save / Load buttons */}
+      {/* Row 1: 불러오기 / 저장하기 */}
       <div className="flex gap-2">
         <button
-          onClick={() => setPanel(panel === 'load' ? null : 'load')}
+          onClick={() => setShowLoad((v) => !v)}
           disabled={slots.length === 0}
           className="flex-1 py-2 rounded-xl text-sm font-semibold text-blue-700
                      border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors
@@ -109,67 +186,56 @@ export default function AnswerInput({
           불러오기 ({slots.length})
         </button>
         <button
-          onClick={() => setPanel(panel === 'save' ? null : 'save')}
-          disabled={!hasAny}
+          onClick={handleSave}
+          disabled={!hasAny || slots.length >= MAX_SLOTS}
           className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors
             ${saveFlash
               ? 'bg-green-500 text-white border border-green-500'
               : 'text-gray-600 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed'
             }`}
         >
-          {saveFlash ? '저장 완료 ✓' : `저장하기`}
+          {saveFlash ? '저장 완료 ✓' : slots.length >= MAX_SLOTS ? `저장 (${MAX_SLOTS}/${MAX_SLOTS})` : '저장하기'}
         </button>
       </div>
 
-      {/* Save panel */}
-      {panel === 'save' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-amber-800">
-            정답 저장 ({slots.length}/{MAX_SLOTS})
-          </p>
+      {/* Row 2: CSV 내보내기 / 가져오기 */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleExport}
+          disabled={slots.length === 0}
+          className="flex-1 py-1.5 rounded-xl text-xs font-semibold text-gray-500
+                     border border-gray-200 hover:bg-gray-50 transition-colors
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          CSV 내보내기 ↓
+        </button>
+        <label
+          className="flex-1 py-1.5 rounded-xl text-xs font-semibold text-gray-500
+                     border border-gray-200 hover:bg-gray-50 transition-colors
+                     text-center cursor-pointer"
+        >
+          CSV 가져오기 ↑
           <input
-            type="text"
-            placeholder="저장 이름 (예: 3월 1주차 받아쓰기)"
-            value={saveName}
-            onChange={(e) => setSaveName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && slots.length < MAX_SLOTS && doSave()}
-            className="w-full px-3 py-2 border border-amber-200 rounded-lg text-sm
-                       focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+            ref={importRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleImport}
           />
-          {slots.length < MAX_SLOTS && (
-            <button
-              onClick={() => doSave()}
-              className="py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
-            >
-              새로 저장
-            </button>
-          )}
-          {slots.length > 0 && (
-            <>
-              <p className="text-xs text-gray-500 mt-1">기존 슬롯에 덮어쓰기:</p>
-              <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
-                {slots.map((slot, i) => (
-                  <button
-                    key={i}
-                    onClick={() => doSave(i)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left
-                               border border-gray-200 bg-white hover:bg-amber-50 transition-colors"
-                  >
-                    <span className="text-gray-400 text-xs w-4 shrink-0">{i + 1}.</span>
-                    <span className="flex-1 truncate">{slot.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">덮어쓰기</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+        </label>
+      </div>
+
+      {/* Import feedback */}
+      {importMsg && (
+        <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 text-center">
+          {importMsg}
         </div>
       )}
 
       {/* Load panel */}
-      {panel === 'load' && slots.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-blue-700">저장된 정답 ({slots.length}개)</p>
+      {showLoad && slots.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs font-semibold text-blue-700 mb-1">저장된 정답 ({slots.length}개)</p>
           <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
             {slots.map((slot, i) => (
               <div
