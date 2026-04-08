@@ -20,7 +20,6 @@ async function prepareImage(file: File, degrees: number): Promise<File> {
       const w = img.naturalWidth;
       const h = img.naturalHeight;
 
-      // Resize so the long side is at most MAX_DIMENSION
       const longSide = Math.max(w, h);
       const scale = longSide > MAX_DIMENSION ? MAX_DIMENSION / longSide : 1;
       const sw = Math.round(w * scale);
@@ -52,10 +51,7 @@ async function prepareImage(file: File, degrees: number): Promise<File> {
         0.80,
       );
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('이미지 로드 실패'));
-    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('이미지 로드 실패')); };
     img.src = url;
   });
 }
@@ -67,7 +63,8 @@ const phaseLabels: Record<LoadingPhase, string> = {
 };
 
 export default function ImageCapture({ onGrade, onBack, loading, loadingPhase }: ImageCaptureProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null); // 사진첩 (capture 없음)
+  const cameraRef = useRef<HTMLInputElement>(null);  // 카메라 직접 (capture)
   const [preview, setPreview] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [rotation, setRotation] = useState(0);
@@ -85,7 +82,8 @@ export default function ImageCapture({ onGrade, onBack, loading, loadingPhase }:
     setPreview(null);
     setSelectedFile(null);
     setRotation(0);
-    if (inputRef.current) inputRef.current.value = '';
+    if (galleryRef.current) galleryRef.current.value = '';
+    if (cameraRef.current) cameraRef.current.value = '';
   }
 
   function rotate(delta: number) {
@@ -108,15 +106,27 @@ export default function ImageCapture({ onGrade, onBack, loading, loadingPhase }:
       </div>
 
       {!preview ? (
-        <div
-          onClick={() => inputRef.current?.click()}
-          className="w-full h-52 border-2 border-dashed border-amber-300 rounded-xl
-                     flex flex-col items-center justify-center gap-2 cursor-pointer
-                     hover:border-amber-400 hover:bg-amber-50 transition-colors bg-amber-50/40"
-        >
-          <span className="text-4xl">📷</span>
-          <span className="text-sm font-medium text-gray-600">사진 찍기 / 파일 선택</span>
-          <span className="text-xs text-gray-400">JPG, PNG, HEIC 지원</span>
+        /* 사진 선택 영역 – 카메라 / 사진첩 두 버튼 */
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => cameraRef.current?.click()}
+            className="w-full py-5 border-2 border-dashed border-amber-300 rounded-xl
+                       flex flex-col items-center justify-center gap-1.5 cursor-pointer
+                       hover:border-amber-400 hover:bg-amber-50 transition-colors bg-amber-50/40"
+          >
+            <span className="text-3xl">📷</span>
+            <span className="text-sm font-semibold text-gray-700">카메라로 찍기</span>
+          </button>
+          <button
+            onClick={() => galleryRef.current?.click()}
+            className="w-full py-4 border border-gray-200 rounded-xl
+                       flex flex-col items-center justify-center gap-1 cursor-pointer
+                       hover:bg-gray-50 transition-colors"
+          >
+            <span className="text-2xl">🖼️</span>
+            <span className="text-sm font-medium text-gray-600">사진첩에서 선택</span>
+            <span className="text-xs text-gray-400">JPG, PNG, HEIC 지원</span>
+          </button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -148,43 +158,33 @@ export default function ImageCapture({ onGrade, onBack, loading, loadingPhase }:
           </div>
 
           <div className="flex gap-2">
-            <button
-              onClick={() => rotate(-90)}
+            <button onClick={() => rotate(-90)}
               className="flex-1 py-2 rounded-xl text-sm font-semibold text-gray-600
-                         border border-gray-300 hover:bg-gray-50 transition-colors"
-            >
+                         border border-gray-300 hover:bg-gray-50 transition-colors">
               ↺ 왼쪽 회전
             </button>
-            <button
-              onClick={() => rotate(90)}
+            <button onClick={() => rotate(90)}
               className="flex-1 py-2 rounded-xl text-sm font-semibold text-gray-600
-                         border border-gray-300 hover:bg-gray-50 transition-colors"
-            >
+                         border border-gray-300 hover:bg-gray-50 transition-colors">
               ↻ 오른쪽 회전
             </button>
           </div>
         </div>
       )}
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handleFileChange}
-      />
+      {/* 숨겨진 파일 input 두 개 */}
+      <input ref={galleryRef} type="file" accept="image/*"
+             className="hidden" onChange={handleFileChange} />
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment"
+             className="hidden" onChange={handleFileChange} />
 
-      {/* Loading phase indicator */}
+      {/* 로딩 표시 */}
       {loading && (
         <div className="flex flex-col items-center gap-2 py-3 bg-blue-50 rounded-xl border border-blue-100">
           <div className="flex gap-1.5">
             {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
-                style={{ animationDelay: `${i * 0.18}s` }}
-              />
+              <div key={i} className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
+                   style={{ animationDelay: `${i * 0.18}s` }} />
             ))}
           </div>
           <p className="text-sm text-blue-700 font-semibold">{phaseLabel}</p>
@@ -195,31 +195,23 @@ export default function ImageCapture({ onGrade, onBack, loading, loadingPhase }:
       )}
 
       <div className="flex gap-2">
-        <button
-          onClick={onBack}
-          disabled={loading}
+        <button onClick={onBack} disabled={loading}
           className="flex-1 py-3 rounded-xl font-semibold text-gray-600 border border-gray-300
                      hover:bg-gray-50 active:bg-gray-100 transition-colors
-                     disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+                     disabled:opacity-50 disabled:cursor-not-allowed">
           ← 이전
         </button>
-        <button
-          onClick={handleGrade}
-          disabled={!selectedFile || loading}
+        <button onClick={handleGrade} disabled={!selectedFile || loading}
           className="flex-[2] py-3 rounded-xl font-semibold text-white text-base
                      bg-green-600 hover:bg-green-700 active:bg-green-800
                      disabled:bg-gray-300 disabled:cursor-not-allowed
-                     transition-colors flex items-center justify-center gap-2"
-        >
+                     transition-colors flex items-center justify-center gap-2">
           {loading ? (
             <>
               <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               {phaseLabel}
             </>
-          ) : (
-            '채점하기 ✓'
-          )}
+          ) : '채점하기 ✓'}
         </button>
       </div>
     </div>
