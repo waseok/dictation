@@ -96,6 +96,7 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
   const [saveFlash, setSaveFlash] = useState(false);
 
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
@@ -130,19 +131,35 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
   async function confirmSave() {
     const name = saveName.trim() || `저장 ${slots.length + 1}`;
     const newSlot: Omit<Slot, 'id'> = { name, answers: [...answers], options };
+    let ok = false;
     if (supabase) {
       const saved = await sbSaveSlot(newSlot);
-      if (saved) setSlots((prev) => [...prev, saved].slice(0, MAX_SLOTS));
+      if (saved) {
+        setSlots((prev) => [...prev, saved].slice(0, MAX_SLOTS));
+        ok = true;
+      } else {
+        // Supabase 실패 → localStorage 폴백
+        const existing = lsGetSlots();
+        const next = [...existing, newSlot].slice(0, MAX_SLOTS);
+        lsPersistSlots(next);
+        setSlots(next);
+        ok = true; // localStorage엔 저장됨 (클라우드는 실패)
+        setSaveError(true);
+        setTimeout(() => setSaveError(false), 3000);
+      }
     } else {
       const existing = lsGetSlots();
       const next = [...existing, newSlot].slice(0, MAX_SLOTS);
       lsPersistSlots(next);
       setSlots(next);
+      ok = true;
     }
     setShowSaveInput(false);
     setSaveName('');
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 1500);
+    if (ok) {
+      setSaveFlash(true);
+      setTimeout(() => setSaveFlash(false), 1500);
+    }
   }
 
   function doLoad(i: number) {
@@ -299,6 +316,12 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
           <input ref={importRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImport} />
         </label>
       </div>
+
+      {saveError && (
+        <div className="px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-700 text-center">
+          ⚠️ 클라우드 저장 실패 – 이 기기 로컬에만 저장됐습니다
+        </div>
+      )}
 
       {importMsg && (
         <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 text-center">
