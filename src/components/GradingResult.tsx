@@ -8,6 +8,8 @@ interface GradingResultProps {
   result: MultiGradeResult;
   onReset: () => void;
   onNewStudent: () => void;
+  studentName?: string;
+  examType?: 'paper' | 'online';
 }
 
 function ScoreFraction({ correct, total }: { correct: number; total: number }) {
@@ -172,7 +174,7 @@ function ExportDiffView({ tokens }: { tokens: GradeToken[] }) {
 }
 
 // ─── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
-export default function GradingResult({ result, onReset, onNewStudent }: GradingResultProps) {
+export default function GradingResult({ result, onReset, onNewStudent, studentName, examType = 'paper' }: GradingResultProps) {
   const cardRef = useRef<HTMLDivElement>(null);       // 화면용 요약 카드
   const exportRef = useRef<HTMLDivElement>(null);    // 내보내기 전용 전체 카드
   const [downloading, setDownloading] = useState(false);
@@ -234,7 +236,12 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
       <div ref={cardRef}
         className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-800">✏️ 채점 결과</h2>
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">✏️ 채점 결과</h2>
+            {studentName && (
+              <p className="text-sm font-semibold text-blue-600 mt-0.5">{studentName}</p>
+            )}
+          </div>
           <span className="text-xs text-gray-400">{today}</span>
         </div>
         <div className="flex items-center justify-center">
@@ -278,7 +285,7 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         <button onClick={onReset}
           className="flex-1 py-3 rounded-xl font-semibold text-gray-600 border border-gray-300
                      hover:bg-gray-50 active:bg-gray-100 transition-colors">
-          다시 촬영
+          {examType === 'online' ? '다시 입력' : '다시 촬영'}
         </button>
         <button onClick={onNewStudent}
           className="flex-1 py-3 rounded-xl font-semibold text-white
@@ -304,8 +311,13 @@ export default function GradingResult({ result, onReset, onNewStudent }: Grading
         <div ref={exportRef}
           style={{ background: '#fff', padding: 24, fontFamily: 'sans-serif', width: 420 }}>
           {/* 헤더 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ fontSize: 18, fontWeight: 900, color: '#111827' }}>✏️ 채점 결과</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>
+              <span style={{ fontSize: 18, fontWeight: 900, color: '#111827' }}>✏️ 채점 결과</span>
+              {studentName && (
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>{studentName}</div>
+              )}
+            </div>
             <span style={{ fontSize: 12, color: '#9ca3af' }}>{today}</span>
           </div>
 

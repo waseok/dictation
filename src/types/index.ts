@@ -2,6 +2,22 @@ export type TokenStatus = 'correct' | 'spelling-error' | 'spacing-error' | 'miss
 
 export type LoadingPhase = 'idle' | 'ocr' | 'grading';
 
+export type ExamType = 'paper' | 'online';
+
+export type StudentStep = 'name' | 'type' | 'slot' | 'paper' | 'online' | 'result';
+
+export interface GradingOptions {
+  ignorePunctuation: boolean;
+  skipHeaderLine: boolean;
+}
+
+export interface Slot {
+  id?: string;
+  name: string;
+  answers: string[];
+  options: GradingOptions;
+}
+
 export interface GradeToken {
   correct: string;
   student: string;
@@ -28,9 +44,4 @@ export interface QuestionResult {
 export interface MultiGradeResult {
   questions: QuestionResult[];
   totalScore: number;
-}
-
-export interface GradingOptions {
-  ignorePunctuation: boolean;
-  skipHeaderLine: boolean;
 }

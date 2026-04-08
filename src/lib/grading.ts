@@ -227,6 +227,35 @@ export function splitOcrLines(text: string, skipFirstLine = false): string[] {
   return Array.from({ length: maxQ }, (_, i) => questionMap.get(i + 1) ?? '');
 }
 
+/** Grade online exam where each student answer is typed directly (no OCR) */
+export function gradeMultipleDirect(
+  correctAnswers: string[],
+  studentAnswers: string[],
+  options: Partial<GradingOptions> = {},
+): MultiGradeResult {
+  const { ignorePunctuation = false } = options;
+
+  const activeAnswers = correctAnswers
+    .map((answer, i) => ({ answer, originalIndex: i }))
+    .filter(({ answer }) => answer.trim().length > 0);
+
+  const questions: QuestionResult[] = activeAnswers.map(({ answer, originalIndex }) => {
+    const studentAnswer = studentAnswers[originalIndex] ?? '';
+    return {
+      questionNumber: originalIndex + 1,
+      correctAnswer: answer,
+      result: grade(answer, studentAnswer, ignorePunctuation),
+    };
+  });
+
+  const totalScore =
+    questions.length > 0
+      ? Math.round(questions.reduce((sum, q) => sum + q.result.score, 0) / questions.length)
+      : 0;
+
+  return { questions, totalScore };
+}
+
 export function gradeMultiple(
   correctAnswers: string[],
   ocrText: string,

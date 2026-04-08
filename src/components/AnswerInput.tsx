@@ -1,68 +1,30 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { GradingOptions } from '@/types';
+import { GradingOptions, Slot } from '@/types';
 import { supabase } from '@/lib/supabase';
+import {
+  MAX_SLOTS,
+  QUESTION_COUNT,
+  lsGetSlots,
+  lsPersistSlots,
+  sbLoadSlots,
+  sbSaveSlot,
+  sbDeleteSlot,
+} from '@/lib/slots';
 
-const SLOTS_KEY = 'dictation-slots';
-const MAX_SLOTS = 10;
-const QUESTION_COUNT = 10;
-
-interface Slot {
-  id?: string;
-  name: string;
-  answers: string[];
-  options: GradingOptions;
-}
+const DEFAULT_OPTIONS: GradingOptions = { ignorePunctuation: false, skipHeaderLine: true };
 
 interface AnswerInputProps {
-  answers: string[];
-  onChange: (index: number, value: string) => void;
-  options: GradingOptions;
-  onOptionsChange: (opts: GradingOptions) => void;
-  onNext: () => void;
-}
-
-// ─── localStorage ────────────────────────────────────────────────────────────
-function lsGetSlots(): Slot[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(SLOTS_KEY);
-    return raw ? (JSON.parse(raw) as Slot[]) : [];
-  } catch { return []; }
-}
-function lsPersistSlots(slots: Slot[]) {
-  localStorage.setItem(SLOTS_KEY, JSON.stringify(slots));
-}
-
-// ─── Supabase ─────────────────────────────────────────────────────────────────
-async function sbLoadSlots(): Promise<Slot[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('answer_slots')
-    .select('id, name, answers, options')
-    .order('created_at', { ascending: true });
-  if (error || !data) return [];
-  return data.map((r) => ({
-    id: r.id as string,
-    name: r.name as string,
-    answers: r.answers as string[],
-    options: r.options as GradingOptions,
-  }));
-}
-async function sbSaveSlot(slot: Omit<Slot, 'id'>): Promise<Slot | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('answer_slots')
-    .insert({ name: slot.name, answers: slot.answers, options: slot.options })
-    .select('id, name, answers, options')
-    .single();
-  if (error || !data) return null;
-  return { id: data.id as string, name: data.name as string, answers: data.answers as string[], options: data.options as GradingOptions };
-}
-async function sbDeleteSlot(id: string) {
-  if (!supabase) return;
-  await supabase.from('answer_slots').delete().eq('id', id);
+  /** Controlled mode (student flow) */
+  answers?: string[];
+  onChange?: (index: number, value: string) => void;
+  options?: GradingOptions;
+  onOptionsChange?: (opts: GradingOptions) => void;
+  /** If provided, shows "다음 →" button */
+  onNext?: () => void;
+  /** Admin mode: manages own state, hides next button */
+  adminMode?: boolean;
 }
 
 // ─── CSV ──────────────────────────────────────────────────────────────────────
@@ -85,18 +47,39 @@ function parseCSVLine(line: string): string[] {
 function csvCell(v: string) { return `"${v.replace(/"/g, '""')}"`; }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
-export default function AnswerInput({ answers, onChange, options, onOptionsChange, onNext }: AnswerInputProps) {
+export default function AnswerInput({
+  answers: extAnswers,
+  onChange: extOnChange,
+  options: extOptions,
+  onOptionsChange: extOnOptionsChange,
+  onNext,
+  adminMode = false,
+}: AnswerInputProps) {
+  // Internal state for admin mode
+  const [intAnswers, setIntAnswers] = useState<string[]>(Array(QUESTION_COUNT).fill(''));
+  const [intOptions, setIntOptions] = useState<GradingOptions>(DEFAULT_OPTIONS);
+
+  const answers = extAnswers ?? intAnswers;
+  const options = extOptions ?? intOptions;
+
+  function handleAnswerChange(index: number, value: string) {
+    if (extOnChange) extOnChange(index, value);
+    else setIntAnswers((prev) => { const next = [...prev]; next[index] = value; return next; });
+  }
+  function handleOptionsChange(opts: GradingOptions) {
+    if (extOnOptionsChange) extOnOptionsChange(opts);
+    else setIntOptions(opts);
+  }
+
+  // ─── Slots state ───────────────────────────────────────────────────────────
   const [slots, setSlots] = useState<Slot[]>([]);
   const [showLoad, setShowLoad] = useState(false);
   const [expandedSlot, setExpandedSlot] = useState<number | null>(null);
-
-  // 저장 이름 입력
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saveFlash, setSaveFlash] = useState(false);
-
-  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
@@ -114,19 +97,11 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
     load();
   }, []);
 
-  // 저장 입력창 열릴 때 포커스
   useEffect(() => {
-    if (showSaveInput) {
-      setTimeout(() => saveInputRef.current?.focus(), 50);
-    }
+    if (showSaveInput) setTimeout(() => saveInputRef.current?.focus(), 50);
   }, [showSaveInput]);
 
   const hasAny = answers.some((a) => a.trim().length > 0);
-
-  function openSaveInput() {
-    setSaveName('');
-    setShowSaveInput(true);
-  }
 
   async function confirmSave() {
     const name = saveName.trim() || `저장 ${slots.length + 1}`;
@@ -138,12 +113,11 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
         setSlots((prev) => [...prev, saved].slice(0, MAX_SLOTS));
         ok = true;
       } else {
-        // Supabase 실패 → localStorage 폴백
         const existing = lsGetSlots();
         const next = [...existing, newSlot].slice(0, MAX_SLOTS);
         lsPersistSlots(next);
         setSlots(next);
-        ok = true; // localStorage엔 저장됨 (클라우드는 실패)
+        ok = true;
         setSaveError(true);
         setTimeout(() => setSaveError(false), 3000);
       }
@@ -164,8 +138,8 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
 
   function doLoad(i: number) {
     const slot = slots[i];
-    slot.answers.forEach((a, idx) => onChange(idx, a));
-    onOptionsChange(slot.options);
+    slot.answers.forEach((a, idx) => handleAnswerChange(idx, a));
+    handleOptionsChange(slot.options);
     setShowLoad(false);
     setExpandedSlot(null);
   }
@@ -180,7 +154,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
     else if (expandedSlot === i) setExpandedSlot(null);
   }
 
-  // CSV 내보내기
   function handleExport() {
     if (slots.length === 0) return;
     const header = ['이름', ...Array.from({ length: QUESTION_COUNT }, (_, i) => `${i + 1}번`)];
@@ -194,7 +167,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
     document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  // CSV 가져오기
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -210,7 +182,7 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
           return {
             name: cells[0]?.trim() || '가져온 정답',
             answers: Array.from({ length: QUESTION_COUNT }, (_, i) => cells[i + 1]?.trim() ?? ''),
-            options: { ignorePunctuation: false, skipHeaderLine: true },
+            options: DEFAULT_OPTIONS,
           };
         }).filter((s) => s.answers.some((a) => a.length > 0));
         if (imported.length === 0) { setImportMsg('유효한 데이터가 없습니다.'); return; }
@@ -241,14 +213,16 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-bold text-gray-800 mb-1">정답 입력</h2>
+        <h2 className="text-lg font-bold text-gray-800 mb-1">
+          {adminMode ? '정답 관리' : '정답 입력'}
+        </h2>
         <p className="text-sm text-gray-500">
           정답을 입력하고 저장해두면 다음에 바로 불러올 수 있습니다.
           {supabase && <span className="ml-1 text-blue-500 font-medium">☁ 클라우드 저장</span>}
         </p>
       </div>
 
-      {/* Row 1: 불러오기 / 저장하기 */}
+      {/* 불러오기 / 저장하기 */}
       <div className="flex gap-2">
         <button
           onClick={() => { setShowLoad((v) => !v); setShowSaveInput(false); }}
@@ -280,7 +254,7 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
           <input
             ref={saveInputRef}
             type="text"
-            placeholder={`저장 이름 (예: 3월 2주차 받아쓰기)`}
+            placeholder="저장 이름 (예: 3월 2주차 받아쓰기)"
             value={saveName}
             onChange={(e) => setSaveName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') confirmSave(); if (e.key === 'Escape') setShowSaveInput(false); }}
@@ -301,7 +275,7 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
         </div>
       )}
 
-      {/* Row 2: CSV */}
+      {/* CSV */}
       <div className="flex gap-2">
         <button onClick={handleExport} disabled={slots.length === 0}
           className="flex-1 py-1.5 rounded-xl text-xs font-semibold text-gray-500
@@ -322,7 +296,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
           ⚠️ 클라우드 저장 실패 – 이 기기 로컬에만 저장됐습니다
         </div>
       )}
-
       {importMsg && (
         <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 text-center">
           {importMsg}
@@ -343,7 +316,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
 
               return (
                 <div key={slot.id ?? i} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                  {/* 헤더 행 */}
                   <div className="flex items-center gap-2 px-3 py-2">
                     <button
                       onClick={() => setExpandedSlot(isExpanded ? null : i)}
@@ -364,8 +336,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
                       ✕
                     </button>
                   </div>
-
-                  {/* 미리보기 – 축약 (접힌 상태) */}
                   {!isExpanded && nonEmpty.length > 0 && (
                     <div className="px-3 pb-2">
                       <p className="text-xs text-gray-400 truncate">
@@ -373,8 +343,6 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
                       </p>
                     </div>
                   )}
-
-                  {/* 미리보기 – 전체 (펼친 상태) */}
                   {isExpanded && (
                     <div className="px-3 pb-3 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-gray-100 pt-2">
                       {slot.answers.map((a, idx) =>
@@ -404,7 +372,7 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
               className="flex-1 py-2 text-sm bg-transparent border-0 focus:outline-none placeholder-gray-300 text-gray-800"
               placeholder={`${i + 1}번 정답`}
               value={value}
-              onChange={(e) => onChange(i, e.target.value)}
+              onChange={(e) => handleAnswerChange(i, e.target.value)}
             />
           </div>
         ))}
@@ -415,24 +383,26 @@ export default function AnswerInput({ answers, onChange, options, onOptionsChang
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">채점 설정</p>
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={options.ignorePunctuation}
-            onChange={(e) => onOptionsChange({ ...options, ignorePunctuation: e.target.checked })}
+            onChange={(e) => handleOptionsChange({ ...options, ignorePunctuation: e.target.checked })}
             className="w-4 h-4 rounded accent-blue-700" />
-          <span className="text-sm text-gray-700">문장부호 채점 제외 (마침표·쉼표·느낌표 등)</span>
+          <span className="text-sm text-gray-700">문장부호 채점 제외</span>
         </label>
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={options.skipHeaderLine}
-            onChange={(e) => onOptionsChange({ ...options, skipHeaderLine: e.target.checked })}
+            onChange={(e) => handleOptionsChange({ ...options, skipHeaderLine: e.target.checked })}
             className="w-4 h-4 rounded accent-blue-700" />
           <span className="text-sm text-gray-700">시험지 첫 줄(이름·학년란) 자동 무시</span>
         </label>
       </div>
 
-      <button onClick={onNext} disabled={!hasAny}
-        className="w-full py-3 rounded-xl font-semibold text-white text-base
-                   bg-blue-700 hover:bg-blue-800 active:bg-blue-900
-                   disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors">
-        다음 →
-      </button>
+      {!adminMode && onNext && (
+        <button onClick={onNext} disabled={!hasAny}
+          className="w-full py-3 rounded-xl font-semibold text-white text-base
+                     bg-blue-700 hover:bg-blue-800 active:bg-blue-900
+                     disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors">
+          다음 →
+        </button>
+      )}
     </div>
   );
 }
