@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
  * CREATE TABLE answer_slots (
  *   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  *   name text NOT NULL,
+ *   "group" text NOT NULL DEFAULT '',
  *   answers jsonb NOT NULL DEFAULT '[]',
  *   options jsonb NOT NULL DEFAULT '{}',
  *   created_at timestamptz NOT NULL DEFAULT now()
