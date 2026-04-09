@@ -46,7 +46,7 @@ function StatBox({
   );
 }
 
-function QuestionRow({ q }: { q: QuestionResult }) {
+function QuestionRow({ q, examType }: { q: QuestionResult; examType: 'paper' | 'online' }) {
   const [open, setOpen] = useState(false);
   const { result } = q;
 
@@ -85,8 +85,28 @@ function QuestionRow({ q }: { q: QuestionResult }) {
 
       {open && (
         <div className="px-4 py-3 bg-white flex flex-col gap-3">
+          <div className="grid grid-cols-1 gap-2 text-sm">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <span className="text-xs font-semibold text-blue-700">정답</span>
+              <p className="text-gray-800 mt-0.5">{q.correctAnswer}</p>
+            </div>
+            <div
+              className={`rounded-lg border px-3 py-2 ${
+                result.score === 100
+                  ? 'border-green-200 bg-green-50'
+                  : 'border-red-200 bg-red-50'
+              }`}
+            >
+              <span className={`text-xs font-semibold ${result.score === 100 ? 'text-green-700' : 'text-red-700'}`}>
+                내 답
+              </span>
+              <p className={`mt-0.5 ${result.score === 100 ? 'text-gray-800' : 'text-red-700 font-semibold'}`}>
+                {result.ocrText?.trim() ? result.ocrText : '(미입력)'}
+              </p>
+            </div>
+          </div>
           <DiffView tokens={result.tokens} />
-          {result.ocrText && (
+          {examType === 'paper' && result.ocrText && (
             <p className="text-xs text-gray-400">
               OCR: <span className="font-mono">{result.ocrText}</span>
             </p>
@@ -98,7 +118,7 @@ function QuestionRow({ q }: { q: QuestionResult }) {
 }
 
 // ─── 내보내기 전용 카드 (항상 모든 문제 펼침) ─────────────────────────────────
-function ExportQuestionRow({ q }: { q: QuestionResult }) {
+function ExportQuestionRow({ q, examType }: { q: QuestionResult; examType: 'paper' | 'online' }) {
   const { result } = q;
   const isCorrect = result.score === 100;
   const isPartial = result.score > 0 && result.score < 100;
@@ -129,8 +149,28 @@ function ExportQuestionRow({ q }: { q: QuestionResult }) {
       </div>
       {/* 토큰 diff */}
       <div style={{ padding: '10px 14px', background: '#fff' }}>
+        <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+          <div style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 8, padding: '6px 8px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>정답</div>
+            <div style={{ fontSize: 13, color: '#1f2937', marginTop: 2 }}>{q.correctAnswer}</div>
+          </div>
+          <div style={{
+            border: `1px solid ${result.score === 100 ? '#bbf7d0' : '#fecaca'}`,
+            background: result.score === 100 ? '#f0fdf4' : '#fef2f2',
+            borderRadius: 8,
+            padding: '6px 8px',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: result.score === 100 ? '#15803d' : '#b91c1c' }}>내 답</div>
+            <div style={{
+              fontSize: 13,
+              color: result.score === 100 ? '#1f2937' : '#b91c1c',
+              marginTop: 2,
+              fontWeight: result.score === 100 ? 400 : 700,
+            }}>{result.ocrText?.trim() ? result.ocrText : '(미입력)'}</div>
+          </div>
+        </div>
         <ExportDiffView tokens={result.tokens} />
-        {result.ocrText && (
+        {examType === 'paper' && result.ocrText && (
           <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>
             OCR: <span style={{ fontFamily: 'monospace' }}>{result.ocrText}</span>
           </p>
@@ -262,7 +302,7 @@ export default function GradingResult({ result, onReset, onNewStudent, studentNa
       <div className="flex flex-col gap-2">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">문제별 결과</p>
         {result.questions.map((q) => (
-          <QuestionRow key={q.questionNumber} q={q} />
+          <QuestionRow key={q.questionNumber} q={q} examType={examType} />
         ))}
       </div>
 
@@ -360,7 +400,7 @@ export default function GradingResult({ result, onReset, onNewStudent, studentNa
             문제별 결과
           </div>
           {result.questions.map((q) => (
-            <ExportQuestionRow key={q.questionNumber} q={q} />
+            <ExportQuestionRow key={q.questionNumber} q={q} examType={examType} />
           ))}
         </div>
       </div>

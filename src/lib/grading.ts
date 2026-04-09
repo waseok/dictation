@@ -159,6 +159,82 @@ export function grade(
   };
 }
 
+/**
+ * Online direct grading:
+ * - Keeps word order strictly (same index comparison)
+ * - Does not perform LCS/fuzzy realignment
+ * This improves trust for typed answers by reflecting exactly what student wrote.
+ */
+export function gradeDirect(
+  correctText: string,
+  studentText: string,
+  ignorePunctuation = false,
+): GradeResult {
+  const normFn = ignorePunctuation ? stripPunctuation : (t: string) => t;
+  const correctWords = tokenize(normFn(correctText));
+  const studentWords = tokenize(normFn(studentText));
+  const maxLen = Math.max(correctWords.length, studentWords.length);
+
+  if (maxLen === 0) {
+    return {
+      score: 0,
+      correctCount: 0,
+      spacingErrorCount: 0,
+      spellingErrorCount: 0,
+      missingCount: 0,
+      totalCount: 0,
+      tokens: [],
+      ocrText: studentText,
+    };
+  }
+
+  const tokens: GradeToken[] = [];
+  let correctCount = 0;
+  let spacingErrorCount = 0;
+  let spellingErrorCount = 0;
+  let missingCount = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const cw = correctWords[i] ?? '';
+    const sw = studentWords[i] ?? '';
+
+    let status: TokenStatus;
+    if (!cw && sw) {
+      // Extra student word (no matching expected word at this position)
+      status = 'spelling-error';
+      spellingErrorCount++;
+    } else if (cw && !sw) {
+      status = 'missing';
+      missingCount++;
+    } else if (cw === sw) {
+      status = 'correct';
+      correctCount++;
+    } else if (removeSpaces(cw) === removeSpaces(sw)) {
+      status = 'spacing-error';
+      spacingErrorCount++;
+    } else {
+      status = 'spelling-error';
+      spellingErrorCount++;
+    }
+
+    tokens.push({ correct: cw, student: sw, status });
+  }
+
+  const totalCount = maxLen;
+  const score = Math.round((correctCount / totalCount) * 100);
+
+  return {
+    score,
+    correctCount,
+    spacingErrorCount,
+    spellingErrorCount,
+    missingCount,
+    totalCount,
+    tokens,
+    ocrText: studentText,
+  };
+}
+
 // Remove leading question numbers like "1.", "1)", "①" etc.
 function cleanAnswerLine(line: string): string {
   return line.replace(/^\s*(\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '').trim();
@@ -249,7 +325,7 @@ export function gradeMultipleDirect(
     return {
       questionNumber: originalIndex + 1,
       correctAnswer: answer,
-      result: grade(answer, studentAnswer, ignorePunctuation),
+      result: gradeDirect(answer, studentAnswer, ignorePunctuation),
     };
   });
 
