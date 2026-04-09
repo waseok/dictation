@@ -17,38 +17,102 @@ export function lsPersistSlots(slots: Slot[]) {
   localStorage.setItem(SLOTS_KEY, JSON.stringify(slots));
 }
 
+function mapRowToSlot(row: {
+  id: string;
+  name: string;
+  answers: string[];
+  options: GradingOptions;
+  group?: string | null;
+}): Slot {
+  return {
+    id: row.id,
+    name: row.name,
+    group: row.group ?? '',
+    answers: row.answers,
+    options: row.options,
+  };
+}
+
+function isMissingGroupColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const msg = String((error as { message?: string }).message ?? '').toLowerCase();
+  return msg.includes('group') && msg.includes('column');
+}
+
 export async function sbLoadSlots(): Promise<Slot[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase
+  const withGroup = await supabase
     .from('answer_slots')
     .select('id, name, group, answers, options')
     .order('group', { ascending: true })
     .order('created_at', { ascending: true });
-  if (error || !data) return [];
-  return data.map((r) => ({
+
+  // 기존 테이블에 group 컬럼이 없을 수 있어 하위 호환 조회를 제공합니다.
+  if (withGroup.error && isMissingGroupColumnError(withGroup.error)) {
+    const withoutGroup = await supabase
+      .from('answer_slots')
+      .select('id, name, answers, options')
+      .order('created_at', { ascending: true });
+    if (withoutGroup.error || !withoutGroup.data) return [];
+    const slots = withoutGroup.data.map((r) => mapRowToSlot({
+      id: r.id as string,
+      name: r.name as string,
+      answers: r.answers as string[],
+      options: r.options as GradingOptions,
+    }));
+    if (typeof window !== 'undefined') lsPersistSlots(slots);
+    return slots;
+  }
+
+  if (withGroup.error || !withGroup.data) return [];
+  const slots = withGroup.data.map((r) => mapRowToSlot({
     id: r.id as string,
     name: r.name as string,
-    group: (r.group as string) || '',
+    group: r.group as string | null,
     answers: r.answers as string[],
     options: r.options as GradingOptions,
   }));
+  if (typeof window !== 'undefined') lsPersistSlots(slots);
+  return slots;
 }
 
 export async function sbSaveSlot(slot: Omit<Slot, 'id'>): Promise<Slot | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase
+  const withGroup = await supabase
     .from('answer_slots')
     .insert({ name: slot.name, group: slot.group ?? '', answers: slot.answers, options: slot.options })
     .select('id, name, group, answers, options')
     .single();
-  if (error || !data) return null;
-  return {
-    id: data.id as string,
-    name: data.name as string,
-    group: (data.group as string) || '',
-    answers: data.answers as string[],
-    options: data.options as GradingOptions,
-  };
+
+  if (!withGroup.error && withGroup.data) {
+    const saved = mapRowToSlot({
+      id: withGroup.data.id as string,
+      name: withGroup.data.name as string,
+      group: withGroup.data.group as string | null,
+      answers: withGroup.data.answers as string[],
+      options: withGroup.data.options as GradingOptions,
+    });
+    return saved;
+  }
+
+  // group 컬럼이 아직 없는 DB를 위한 하위 호환 저장 경로
+  if (isMissingGroupColumnError(withGroup.error)) {
+    const withoutGroup = await supabase
+      .from('answer_slots')
+      .insert({ name: slot.name, answers: slot.answers, options: slot.options })
+      .select('id, name, answers, options')
+      .single();
+    if (withoutGroup.error || !withoutGroup.data) return null;
+    const saved = mapRowToSlot({
+      id: withoutGroup.data.id as string,
+      name: withoutGroup.data.name as string,
+      answers: withoutGroup.data.answers as string[],
+      options: withoutGroup.data.options as GradingOptions,
+    });
+    return saved;
+  }
+
+  return null;
 }
 
 export async function sbDeleteSlot(id: string) {
