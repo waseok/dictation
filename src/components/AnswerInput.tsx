@@ -11,6 +11,7 @@ import {
   sbLoadSlots,
   sbSaveSlot,
   sbDeleteSlot,
+  sbProbeAnswerSlots,
 } from '@/lib/slots';
 
 const DEFAULT_OPTIONS: GradingOptions = { ignorePunctuation: false, skipHeaderLine: true };
@@ -80,8 +81,11 @@ export default function AnswerInput({
   const [saveGroup, setSaveGroup] = useState('');
   const [saveFlash, setSaveFlash] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<'local' | 'checking' | 'ok' | 'failed'>(supabase ? 'checking' : 'local');
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,6 +94,20 @@ export default function AnswerInput({
 
   useEffect(() => {
     async function load() {
+      if (!supabase) {
+        setCloudStatus('local');
+        return setSlots(lsGetSlots());
+      }
+
+      const probeError = await sbProbeAnswerSlots();
+      if (probeError) {
+        setCloudStatus('failed');
+        setCloudError(probeError);
+      } else {
+        setCloudStatus('ok');
+        setCloudError(null);
+      }
+
       if (supabase) {
         setSlotsLoading(true);
         const data = await sbLoadSlots();
@@ -115,8 +133,17 @@ export default function AnswerInput({
       const saved = await sbSaveSlot(newSlot);
       if (saved) {
         setSlots((prev) => [...prev, saved].slice(0, MAX_SLOTS));
+        setCloudStatus('ok');
+        setCloudError(null);
+        setSaveErrorDetail(null);
         ok = true;
       } else {
+        const probeError = await sbProbeAnswerSlots();
+        if (probeError) {
+          setCloudStatus('failed');
+          setCloudError(probeError);
+          setSaveErrorDetail(probeError);
+        }
         const existing = lsGetSlots();
         const next = [...existing, newSlot].slice(0, MAX_SLOTS);
         lsPersistSlots(next);
@@ -225,6 +252,12 @@ export default function AnswerInput({
           정답을 입력하고 저장해두면 다음에 바로 불러올 수 있습니다.
           {supabase && <span className="ml-1 text-blue-500 font-medium">☁ 클라우드 저장</span>}
         </p>
+        <p className="text-xs mt-1">
+          {cloudStatus === 'checking' && <span className="text-gray-400">클라우드 연결 확인 중...</span>}
+          {cloudStatus === 'ok' && <span className="text-green-600 font-medium">클라우드 연결 정상 (Supabase 저장 활성)</span>}
+          {cloudStatus === 'failed' && <span className="text-red-600 font-medium">클라우드 연결 실패 (현재 로컬 저장 모드)</span>}
+          {cloudStatus === 'local' && <span className="text-amber-600 font-medium">Supabase 미설정 (현재 로컬 저장 모드)</span>}
+        </p>
       </div>
 
       {/* 불러오기 / 저장하기 */}
@@ -320,6 +353,14 @@ export default function AnswerInput({
       {saveError && (
         <div className="px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-700 text-center">
           ⚠️ 클라우드 저장 실패 – 이 기기 로컬에만 저장됐습니다
+          {saveErrorDetail && (
+            <p className="mt-1 text-xs text-yellow-800 break-all">원인: {saveErrorDetail}</p>
+          )}
+        </div>
+      )}
+      {cloudStatus === 'failed' && cloudError && (
+        <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 break-all">
+          Supabase 오류: {cloudError}
         </div>
       )}
       {importMsg && (

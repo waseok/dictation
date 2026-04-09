@@ -120,6 +120,19 @@ export async function sbDeleteSlot(id: string) {
   await supabase.from('answer_slots').delete().eq('id', id);
 }
 
+/**
+ * Returns null when Supabase connection/table access is healthy,
+ * otherwise returns a short error message for UI diagnostics.
+ */
+export async function sbProbeAnswerSlots(): Promise<string | null> {
+  if (!supabase) return 'Supabase 환경변수(URL/ANON KEY)가 비어 있습니다.';
+  const { error } = await supabase
+    .from('answer_slots')
+    .select('id', { head: true, count: 'exact' });
+  if (!error) return null;
+  return error.message || 'answer_slots 접근에 실패했습니다.';
+}
+
 /** Loads from Supabase if available, falls back to localStorage */
 export async function loadAllSlots(): Promise<Slot[]> {
   if (supabase) {
