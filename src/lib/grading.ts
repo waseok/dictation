@@ -2,12 +2,17 @@ import { GradeResult, GradeToken, TokenStatus, MultiGradeResult, QuestionResult,
 
 const PUNCTUATION_RE = /[.,!?。、·…""''「」『』〈〉《》【】~]/g;
 
+/** NFC 정규화 – 한국어 유니코드 조합 방식 차이로 인한 오채점 방지 */
+function norm(text: string): string {
+  return text.normalize('NFC');
+}
+
 function stripPunctuation(text: string): string {
-  return text.replace(PUNCTUATION_RE, '').replace(/\s+/g, ' ').trim();
+  return norm(text).replace(PUNCTUATION_RE, '').replace(/\s+/g, ' ').trim();
 }
 
 function tokenize(text: string): string[] {
-  return text.trim().split(/\s+/).filter(Boolean);
+  return norm(text).trim().split(/\s+/).filter(Boolean);
 }
 
 function removeSpaces(text: string): string {
