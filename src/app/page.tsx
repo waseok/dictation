@@ -235,10 +235,16 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex items-center justify-center gap-3 text-xs text-gray-400">
-          <span>Powered by Google Gemini</span>
-          <span>·</span>
-          <a href="/admin" className="hover:text-gray-600 underline underline-offset-2">선생님 페이지</a>
+        <div className="flex flex-col items-center gap-3">
+          <a href="/admin"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl
+                       bg-white border border-gray-200 shadow-sm
+                       text-sm font-semibold text-gray-600
+                       hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50
+                       transition-colors">
+            <span>👩‍🏫</span> 선생님 페이지
+          </a>
+          <p className="text-xs text-gray-400">Powered by Google Gemini</p>
         </div>
       </div>
     </main>

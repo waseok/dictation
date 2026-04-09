@@ -14,6 +14,7 @@ export interface GradingOptions {
 export interface Slot {
   id?: string;
   name: string;
+  group?: string;
   answers: string[];
   options: GradingOptions;
 }

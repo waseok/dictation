@@ -77,12 +77,16 @@ export default function AnswerInput({
   const [expandedSlot, setExpandedSlot] = useState<number | null>(null);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const [saveGroup, setSaveGroup] = useState('');
   const [saveFlash, setSaveFlash] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
+
+  // 기존 그룹 목록 (자동완성용)
+  const existingGroups = Array.from(new Set(slots.map((s) => s.group ?? '').filter(Boolean)));
 
   useEffect(() => {
     async function load() {
@@ -105,7 +109,7 @@ export default function AnswerInput({
 
   async function confirmSave() {
     const name = saveName.trim() || `저장 ${slots.length + 1}`;
-    const newSlot: Omit<Slot, 'id'> = { name, answers: [...answers], options };
+    const newSlot: Omit<Slot, 'id'> = { name, group: saveGroup.trim(), answers: [...answers], options };
     let ok = false;
     if (supabase) {
       const saved = await sbSaveSlot(newSlot);
@@ -130,6 +134,7 @@ export default function AnswerInput({
     }
     setShowSaveInput(false);
     setSaveName('');
+    setSaveGroup('');
     if (ok) {
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 1500);
@@ -248,30 +253,51 @@ export default function AnswerInput({
         </button>
       </div>
 
-      {/* 저장 이름 입력 */}
+      {/* 저장 입력 */}
       {showSaveInput && (
-        <div className="flex gap-2 items-center bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-          <input
-            ref={saveInputRef}
-            type="text"
-            placeholder="저장 이름 (예: 3월 2주차 받아쓰기)"
-            value={saveName}
-            onChange={(e) => setSaveName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') confirmSave(); if (e.key === 'Escape') setShowSaveInput(false); }}
-            className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-gray-800 placeholder-gray-400"
-          />
-          <button
-            onClick={confirmSave}
-            className="shrink-0 px-3 py-1 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            저장
-          </button>
-          <button
-            onClick={() => setShowSaveInput(false)}
-            className="shrink-0 text-gray-400 hover:text-gray-600 text-sm"
-          >
-            ✕
-          </button>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex flex-col gap-2">
+          {/* 그룹 입력 */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-blue-600 font-semibold shrink-0 w-8">그룹</span>
+            <input
+              type="text"
+              list="group-suggestions"
+              placeholder="예: 3학년, 4학년 (선택사항)"
+              value={saveGroup}
+              onChange={(e) => setSaveGroup(e.target.value)}
+              className="flex-1 text-sm bg-white border border-blue-200 rounded-lg px-2 py-1
+                         focus:outline-none focus:border-blue-400 text-gray-800 placeholder-gray-400"
+            />
+            <datalist id="group-suggestions">
+              {existingGroups.map((g) => <option key={g} value={g} />)}
+            </datalist>
+          </div>
+          {/* 이름 입력 */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-blue-600 font-semibold shrink-0 w-8">이름</span>
+            <input
+              ref={saveInputRef}
+              type="text"
+              placeholder="예: 3월 2주차 받아쓰기"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmSave(); if (e.key === 'Escape') setShowSaveInput(false); }}
+              className="flex-1 text-sm bg-white border border-blue-200 rounded-lg px-2 py-1
+                         focus:outline-none focus:border-blue-400 text-gray-800 placeholder-gray-400"
+            />
+            <button
+              onClick={confirmSave}
+              className="shrink-0 px-3 py-1 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => setShowSaveInput(false)}
+              className="shrink-0 text-gray-400 hover:text-gray-600 text-sm"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -303,64 +329,85 @@ export default function AnswerInput({
       )}
 
       {/* 불러오기 패널 */}
-      {showLoad && slots.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-1">
-          <p className="text-xs font-semibold text-blue-700 mb-1">저장된 정답 ({slots.length}개)</p>
-          <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
-            {slots.map((slot, i) => {
-              const nonEmpty = slot.answers
-                .map((a, idx) => a.trim() ? `${idx + 1}. ${a}` : null)
-                .filter(Boolean) as string[];
-              const preview = nonEmpty.slice(0, 3).join('  ');
-              const isExpanded = expandedSlot === i;
+      {showLoad && slots.length > 0 && (() => {
+        // 그룹별 묶기
+        const grouped = slots.reduce<Record<string, { slot: Slot; idx: number }[]>>((acc, slot, idx) => {
+          const g = slot.group?.trim() || '미분류';
+          if (!acc[g]) acc[g] = [];
+          acc[g].push({ slot, idx });
+          return acc;
+        }, {});
+        const groupKeys = Object.keys(grouped).sort((a, b) =>
+          a === '미분류' ? 1 : b === '미분류' ? -1 : a.localeCompare(b)
+        );
 
-              return (
-                <div key={slot.id ?? i} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <button
-                      onClick={() => setExpandedSlot(isExpanded ? null : i)}
-                      className="flex-1 text-left flex items-center gap-2 min-w-0"
-                    >
-                      <span className="text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
-                      <span className="text-sm font-semibold text-gray-800 truncate">{slot.name}</span>
-                      <span className="text-gray-400 text-xs shrink-0">{isExpanded ? '▲' : '▼'}</span>
-                    </button>
-                    <button onClick={() => doLoad(i)}
-                      className="shrink-0 px-2 py-1 text-xs font-semibold text-blue-700
-                                 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors">
-                      불러오기
-                    </button>
-                    <button onClick={() => doDelete(i)}
-                      className="shrink-0 w-6 h-6 flex items-center justify-center
-                                 text-gray-400 hover:text-red-500 transition-colors text-sm">
-                      ✕
-                    </button>
-                  </div>
-                  {!isExpanded && nonEmpty.length > 0 && (
-                    <div className="px-3 pb-2">
-                      <p className="text-xs text-gray-400 truncate">
-                        {preview}{nonEmpty.length > 3 ? ` 외 ${nonEmpty.length - 3}개` : ''}
-                      </p>
-                    </div>
-                  )}
-                  {isExpanded && (
-                    <div className="px-3 pb-3 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-gray-100 pt-2">
-                      {slot.answers.map((a, idx) =>
-                        a.trim() ? (
-                          <div key={idx} className="flex gap-1 items-baseline">
-                            <span className="text-xs font-bold text-red-400 shrink-0 w-4 text-right">{idx + 1}.</span>
-                            <span className="text-xs text-gray-700 truncate">{a}</span>
+        return (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-2">
+            <p className="text-xs font-semibold text-blue-700">저장된 정답 ({slots.length}개)</p>
+            <div className="flex flex-col gap-3 max-h-80 overflow-y-auto">
+              {groupKeys.map((groupName) => (
+                <div key={groupName}>
+                  <p className="text-xs font-bold text-blue-500 uppercase tracking-wide mb-1 px-1">
+                    📁 {groupName}
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    {grouped[groupName].map(({ slot, idx: i }) => {
+                      const nonEmpty = slot.answers
+                        .map((a, idx) => a.trim() ? `${idx + 1}. ${a}` : null)
+                        .filter(Boolean) as string[];
+                      const preview = nonEmpty.slice(0, 3).join('  ');
+                      const isExpanded = expandedSlot === i;
+
+                      return (
+                        <div key={slot.id ?? i} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                          <div className="flex items-center gap-2 px-3 py-2">
+                            <button
+                              onClick={() => setExpandedSlot(isExpanded ? null : i)}
+                              className="flex-1 text-left flex items-center gap-2 min-w-0"
+                            >
+                              <span className="text-sm font-semibold text-gray-800 truncate">{slot.name}</span>
+                              <span className="text-gray-400 text-xs shrink-0">{isExpanded ? '▲' : '▼'}</span>
+                            </button>
+                            <button onClick={() => doLoad(i)}
+                              className="shrink-0 px-2 py-1 text-xs font-semibold text-blue-700
+                                         border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors">
+                              불러오기
+                            </button>
+                            <button onClick={() => doDelete(i)}
+                              className="shrink-0 w-6 h-6 flex items-center justify-center
+                                         text-gray-400 hover:text-red-500 transition-colors text-sm">
+                              ✕
+                            </button>
                           </div>
-                        ) : null
-                      )}
-                    </div>
-                  )}
+                          {!isExpanded && nonEmpty.length > 0 && (
+                            <div className="px-3 pb-2">
+                              <p className="text-xs text-gray-400 truncate">
+                                {preview}{nonEmpty.length > 3 ? ` 외 ${nonEmpty.length - 3}개` : ''}
+                              </p>
+                            </div>
+                          )}
+                          {isExpanded && (
+                            <div className="px-3 pb-3 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-gray-100 pt-2">
+                              {slot.answers.map((a, idx) =>
+                                a.trim() ? (
+                                  <div key={idx} className="flex gap-1 items-baseline">
+                                    <span className="text-xs font-bold text-red-400 shrink-0 w-4 text-right">{idx + 1}.</span>
+                                    <span className="text-xs text-gray-700 truncate">{a}</span>
+                                  </div>
+                                ) : null
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 정답 입력 */}
       <div className="flex flex-col notebook-lines rounded-xl overflow-hidden border border-amber-100">

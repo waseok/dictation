@@ -21,12 +21,14 @@ export async function sbLoadSlots(): Promise<Slot[]> {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('answer_slots')
-    .select('id, name, answers, options')
+    .select('id, name, group, answers, options')
+    .order('group', { ascending: true })
     .order('created_at', { ascending: true });
   if (error || !data) return [];
   return data.map((r) => ({
     id: r.id as string,
     name: r.name as string,
+    group: (r.group as string) || '',
     answers: r.answers as string[],
     options: r.options as GradingOptions,
   }));
@@ -36,13 +38,14 @@ export async function sbSaveSlot(slot: Omit<Slot, 'id'>): Promise<Slot | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('answer_slots')
-    .insert({ name: slot.name, answers: slot.answers, options: slot.options })
-    .select('id, name, answers, options')
+    .insert({ name: slot.name, group: slot.group ?? '', answers: slot.answers, options: slot.options })
+    .select('id, name, group, answers, options')
     .single();
   if (error || !data) return null;
   return {
     id: data.id as string,
     name: data.name as string,
+    group: (data.group as string) || '',
     answers: data.answers as string[],
     options: data.options as GradingOptions,
   };
